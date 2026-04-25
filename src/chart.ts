@@ -87,7 +87,7 @@ export function render(
     line: { color: '#facc15', width: 1, dash: 'dot' },
   }));
 
-  Plotly.react(
+  return Plotly.react(
     el,
     traces,
     {
@@ -138,7 +138,7 @@ function renderSmith(
     }
   }
 
-  Plotly.react(
+  return Plotly.react(
     el,
     traces,
     {
@@ -158,7 +158,7 @@ function renderSmith(
   ).then(() => Plotly.Plots.resize(el));
 }
 
-function plotTitle(entries: ChartEntry[], view: View): Partial<Plotly.DataTitle> {
+function plotTitle(entries: ChartEntry[], view: View) {
   const files = entries.map((e) => e.label).join(', ');
 
   let params: string;
@@ -183,7 +183,7 @@ function plotTitle(entries: ChartEntry[], view: View): Partial<Plotly.DataTitle>
     text: `${files} · ${params}`,
     font: { size: 12, color: '#52525b' },
     x: 0.02,
-    xanchor: 'left',
+    xanchor: 'left' as const,
     pad: { t: 4 },
   };
 }
