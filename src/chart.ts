@@ -98,7 +98,7 @@ export function render(
       shapes,
     },
     { responsive: true },
-  );
+  ).then(() => Plotly.Plots.resize(el));
 }
 
 function renderSmith(
@@ -154,7 +154,7 @@ function renderSmith(
       yaxis: { ...AXIS_STYLE, title: { text: 'Im(Γ)' }, range: [-1.1, 1.1] },
     },
     { responsive: true },
-  );
+  ).then(() => Plotly.Plots.resize(el));
 }
 
 function smithGrid(): Plotly.Data[] {

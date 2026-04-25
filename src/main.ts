@@ -53,8 +53,7 @@ function load(file: File): void {
 
     attachClickListener();
     renderFileBar();
-    // Defer one frame so the browser lays out chartEl before Plotly measures it
-    requestAnimationFrame(renderChart);
+    renderChart();
   };
   reader.readAsText(file);
 }
