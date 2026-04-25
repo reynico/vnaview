@@ -13,11 +13,21 @@
         <nav id="views" hidden>
           <button data-view="db" class="active">dB</button>
           <button data-view="phase">Phase</button>
-          <button data-view="vswr" hidden>VSWR</button>
+          <button data-view="vswr">VSWR</button>
           <button data-view="smith">Smith</button>
         </nav>
-        <button id="clear" hidden>Clear</button>
+        <button id="compare" hidden>Compare</button>
+        <button id="clear" hidden>Clear all</button>
+        <a
+          id="repo-link"
+          href="https://github.com/reynico/vnaview"
+          target="_blank"
+          rel="noopener"
+        >GitHub ↗</a>
       </header>
+      <div id="file-bar" hidden>
+        <div id="file-chips"></div>
+      </div>
       <main>
         <div id="drop-zone">
           <p>Drop a .s1p or .s2p file</p>

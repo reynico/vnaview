@@ -74,8 +74,8 @@ button.active {
   font-weight: 500;
 }
 
-#clear {
-  margin-left: 0.25rem;
+#compare {
+  margin-left: 0.5rem;
 }
 
 #clear:hover {
@@ -83,11 +83,113 @@ button.active {
   color: var(--danger);
 }
 
+#repo-link {
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-decoration: none;
+  margin-left: 0.25rem;
+  transition: color 0.15s;
+}
+
+#repo-link:hover {
+  color: var(--text);
+}
+
+/* File bar */
+#file-bar {
+  display: flex;
+  align-items: center;
+  padding: 0.35rem 1rem;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  min-height: 2.2rem;
+}
+
+#file-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.25rem 0.15rem 0.5rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.2rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: border-color 0.15s;
+  user-select: none;
+}
+
+.file-chip:hover {
+  border-color: var(--accent);
+}
+
+.file-chip.active {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.chip-name {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.file-chip.active .chip-name {
+  color: var(--text);
+}
+
+.chip-remove {
+  padding: 0 0.2rem;
+  border: none;
+  border-radius: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1;
+  background: transparent;
+  transition: color 0.15s;
+}
+
+.chip-remove:hover {
+  border-color: transparent;
+  color: var(--danger);
+}
+
+/* Main area */
 main {
   flex: 1;
   position: relative;
   overflow: hidden;
   min-height: 0;
+}
+
+main.dropping::after {
+  content: 'Drop to add file';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(56, 189, 248, 0.06);
+  border: 2px dashed var(--accent);
+  color: var(--accent);
+  font-size: 0.9rem;
+  pointer-events: none;
+  z-index: 10;
 }
 
 #drop-zone {
@@ -125,6 +227,7 @@ main {
   height: 100%;
 }
 
+/* Marker bar */
 #markers {
   border-top: 1px solid var(--border);
   padding: 0.4rem 1rem;
