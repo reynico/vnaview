@@ -33,10 +33,9 @@ export function render(
   entries: ChartEntry[],
   view: View,
   markers: number[],
-): void {
+): Promise<void> {
   if (view === 'smith') {
-    renderSmith(el, entries, markers);
-    return;
+    return renderSmith(el, entries, markers);
   }
 
   const compare = entries.length > 1;
@@ -105,7 +104,7 @@ function renderSmith(
   el: HTMLElement,
   entries: ChartEntry[],
   markers: number[],
-): void {
+): Promise<void> {
   const traces: Plotly.Data[] = [...smithGrid()];
 
   for (const { label, color, data } of entries) {

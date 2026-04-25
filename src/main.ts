@@ -51,9 +51,8 @@ function load(file: File): void {
     clearBtn.hidden = false;
     markersEl.hidden = false;
 
-    attachClickListener();
     renderFileBar();
-    renderChart();
+    renderChart().then(attachClickListener);
   };
   reader.readAsText(file);
 }
@@ -93,10 +92,10 @@ function activeEntries(): ChartEntry[] {
   return f ? [{ label: f.name, color: f.color, data: f.data }] : [];
 }
 
-function renderChart(): void {
+function renderChart(): Promise<void> {
   const entries = activeEntries();
-  if (entries.length === 0) return;
-  render(chartEl, entries, view, markers);
+  if (entries.length === 0) return Promise.resolve();
+  return render(chartEl, entries, view, markers);
 }
 
 function renderFileBar(): void {
