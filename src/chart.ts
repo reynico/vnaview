@@ -16,7 +16,7 @@ const BASE_LAYOUT: Partial<Plotly.Layout> = {
   paper_bgcolor: '#0f0f10',
   plot_bgcolor: '#0f0f10',
   font: { color: '#e4e4e7', size: 12, family: 'system-ui, sans-serif' },
-  margin: { t: 16, r: 16, b: 52, l: 68 },
+  margin: { t: 36, r: 16, b: 52, l: 68 },
   legend: { bgcolor: 'transparent', bordercolor: '#27272a' },
   hovermode: 'x unified',
 };
@@ -92,6 +92,7 @@ export function render(
     traces,
     {
       ...BASE_LAYOUT,
+      title: plotTitle(entries, view),
       xaxis: { ...AXIS_STYLE, title: { text: 'Frequency (MHz)' } },
       yaxis: { ...AXIS_STYLE, title: { text: yTitle } },
       shapes,
@@ -142,6 +143,7 @@ function renderSmith(
     traces,
     {
       ...BASE_LAYOUT,
+      title: plotTitle(entries, 'smith'),
       hovermode: 'closest',
       xaxis: {
         ...AXIS_STYLE,
@@ -154,6 +156,36 @@ function renderSmith(
     },
     { responsive: true },
   ).then(() => Plotly.Plots.resize(el));
+}
+
+function plotTitle(entries: ChartEntry[], view: View): Partial<Plotly.DataTitle> {
+  const files = entries.map((e) => e.label).join(', ');
+
+  let params: string;
+  if (view === 'smith') {
+    params = 'S11 · Smith Chart';
+  } else {
+    const viewLabel =
+      view === 'db' ? 'Magnitude (dB)' : view === 'phase' ? 'Phase' : 'VSWR';
+    if (entries.length > 1) {
+      params = `S11${entries.some((e) => e.data.ports === 2) ? ', S21' : ''} · ${viewLabel}`;
+    } else {
+      const { ports } = entries[0].data;
+      const measured =
+        ports === 1 ? 'S11'
+        : view === 'vswr' ? 'S11, S22'
+        : 'S11–S22';
+      params = `${measured} · ${viewLabel}`;
+    }
+  }
+
+  return {
+    text: `${files} · ${params}`,
+    font: { size: 12, color: '#52525b' },
+    x: 0.02,
+    xanchor: 'left',
+    pad: { t: 4 },
+  };
 }
 
 function smithGrid(): Plotly.Data[] {
