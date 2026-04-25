@@ -14,7 +14,7 @@
   "devDependencies": {
     "@types/plotly.js": "^2.12.29",
     "typescript": "^5.4.5",
-    "vite": "^5.4.11",
-    "vitest": "^2.1.8"
+    "vite": "^6.3.5",
+    "vitest": "^3.1.2"
   }
 }
