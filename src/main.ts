@@ -212,16 +212,16 @@ mainEl.addEventListener('drop', (e) => {
   e.preventDefault();
   mainEl.classList.remove('dropping');
   dropZone.classList.remove('over');
-  const file = e.dataTransfer?.files[0];
-  if (file) load(file);
+  if (e.dataTransfer?.files) Array.from(e.dataTransfer.files).forEach(load);
 });
 
 dropZone.addEventListener('click', () => {
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = '.s1p,.s2p';
+  input.multiple = true;
   input.onchange = () => {
-    if (input.files?.[0]) load(input.files[0]);
+    if (input.files) Array.from(input.files).forEach(load);
   };
   input.click();
 });
