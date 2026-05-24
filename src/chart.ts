@@ -40,7 +40,10 @@ export function render(
 
   const compare = entries.length > 1;
   const traces: Plotly.Data[] = [];
-  const fn = view === 'db' ? toDB : view === 'phase' ? toPhase : toVSWR;
+  const rawFn = view === 'db' ? toDB : view === 'phase' ? toPhase : toVSWR;
+  const fn = view === 'vswr'
+    ? (c: Parameters<typeof toVSWR>[0]) => Math.round(rawFn(c) * 100) / 100
+    : rawFn;
 
   for (const { label, color, data } of entries) {
     const freqs = data.points.map((p) => p.freq / 1e6);
