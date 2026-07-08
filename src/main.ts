@@ -20,6 +20,7 @@ const markers: Marker[] = [];
 let nextMarkerId = 1;
 let dbPerDiv = 10;
 let refLevel = 0;
+let freqRange: [number, number] | null = null;
 
 const mainEl = document.querySelector('main')!;
 const dropZone = document.getElementById('drop-zone')!;
@@ -37,6 +38,11 @@ const scaleBar = document.getElementById('scale-bar')!;
 const scaleDivInput = document.getElementById('scale-div') as HTMLInputElement;
 const scaleRefInput = document.getElementById('scale-ref') as HTMLInputElement;
 const scaleAutoBtn = document.getElementById('scale-auto')!;
+const freqBar = document.getElementById('freq-bar')!;
+const freqStartInput = document.getElementById('freq-start') as HTMLInputElement;
+const freqStopInput = document.getElementById('freq-stop') as HTMLInputElement;
+const freqCenterInput = document.getElementById('freq-center') as HTMLInputElement;
+const freqSpanInput = document.getElementById('freq-span') as HTMLInputElement;
 
 function nextColor(): string {
   return FILE_COLORS[files.length % FILE_COLORS.length];
@@ -63,7 +69,10 @@ function load(file: File): void {
 
     renderFileBar();
     updateScaleBarVisibility();
-    renderChart().then(attachClickListener);
+    renderChart().then(() => {
+      attachClickListener();
+      attachRelayoutListener();
+    });
   };
   reader.readAsText(file);
 }
@@ -88,6 +97,7 @@ function reset(): void {
   nextMarkerId = 1;
   dbPerDiv = 10;
   refLevel = 0;
+  freqRange = null;
   scaleDivInput.value = String(dbPerDiv);
   scaleRefInput.value = String(refLevel);
   dropZone.hidden = false;
@@ -98,6 +108,7 @@ function reset(): void {
   markersEl.hidden = true;
   compareBtn.hidden = true;
   scaleBar.hidden = true;
+  freqBar.hidden = true;
   traceInfoBar.innerHTML = '';
   renderMarkerList();
 }
@@ -137,7 +148,48 @@ function renderChart(): Promise<void> {
   const entries = activeEntries();
   if (entries.length === 0) return Promise.resolve();
   renderTraceInfoBar(entries);
-  return render(chartEl, entries, view, markers, dbPerDiv, refLevel);
+  renderFreqBar(entries);
+  return render(chartEl, entries, view, markers, dbPerDiv, refLevel, freqRange);
+}
+
+function dataExtent(entries: ChartEntry[]): [number, number] | null {
+  let min = Infinity;
+  let max = -Infinity;
+  for (const e of entries) {
+    for (const p of e.data.points) {
+      if (p.freq < min) min = p.freq;
+      if (p.freq > max) max = p.freq;
+    }
+  }
+  return Number.isFinite(min) && Number.isFinite(max) ? [min, max] : null;
+}
+
+function renderFreqBar(entries: ChartEntry[]): void {
+  freqBar.hidden = entries.length === 0 || view === 'smith';
+  if (freqBar.hidden) return;
+  const range = freqRange ?? dataExtent(entries);
+  if (!range) return;
+  const [start, stop] = range;
+  freqStartInput.value = (start / 1e6).toFixed(3);
+  freqStopInput.value = (stop / 1e6).toFixed(3);
+  freqCenterInput.value = ((start + stop) / 2 / 1e6).toFixed(3);
+  freqSpanInput.value = ((stop - start) / 1e6).toFixed(3);
+}
+
+function applyStartStop(): void {
+  const startMHz = parseFloat(freqStartInput.value);
+  const stopMHz = parseFloat(freqStopInput.value);
+  if (!Number.isFinite(startMHz) || !Number.isFinite(stopMHz) || stopMHz <= startMHz) return;
+  freqRange = [startMHz * 1e6, stopMHz * 1e6];
+  renderChart();
+}
+
+function applyCenterSpan(): void {
+  const centerMHz = parseFloat(freqCenterInput.value);
+  const spanMHz = parseFloat(freqSpanInput.value);
+  if (!Number.isFinite(centerMHz) || !Number.isFinite(spanMHz) || spanMHz <= 0) return;
+  freqRange = [(centerMHz - spanMHz / 2) * 1e6, (centerMHz + spanMHz / 2) * 1e6];
+  renderChart();
 }
 
 function formatLabel(v: View): string {
@@ -288,6 +340,28 @@ function attachClickListener(): void {
   });
 }
 
+let relayoutListenerAttached = false;
+
+function attachRelayoutListener(): void {
+  if (relayoutListenerAttached) return;
+  relayoutListenerAttached = true;
+
+  (chartEl as any).on('plotly_relayout', (ev: any) => {
+    if (view === 'smith') return;
+    if (ev['xaxis.autorange']) {
+      freqRange = null;
+      renderFreqBar(activeEntries());
+      return;
+    }
+    const x0 = ev['xaxis.range[0]'];
+    const x1 = ev['xaxis.range[1]'];
+    if (typeof x0 === 'number' && typeof x1 === 'number') {
+      freqRange = [x0 * 1e6, x1 * 1e6];
+      renderFreqBar(activeEntries());
+    }
+  });
+}
+
 // Drop on entire main area (works whether drop zone or chart is visible)
 mainEl.addEventListener('dragover', (e) => {
   e.preventDefault();
@@ -359,3 +433,8 @@ scaleRefInput.addEventListener('change', () => {
 });
 
 scaleAutoBtn.addEventListener('click', autoscaleOnce);
+
+freqStartInput.addEventListener('change', applyStartStop);
+freqStopInput.addEventListener('change', applyStartStop);
+freqCenterInput.addEventListener('change', applyCenterSpan);
+freqSpanInput.addEventListener('change', applyCenterSpan);

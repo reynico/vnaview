@@ -292,6 +292,41 @@ main.dropping::after {
   height: 100%;
 }
 
+#freq-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.25rem;
+  padding: 0.35rem 1rem;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+#freq-bar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-family: monospace;
+}
+
+#freq-bar input {
+  width: 5.5rem;
+  padding: 0.15rem 0.35rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.2rem;
+  color: var(--text);
+  font-family: monospace;
+  font-size: 0.75rem;
+}
+
+#freq-bar input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 /* Marker bar */
 #markers {
   border-top: 1px solid var(--border);

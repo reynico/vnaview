@@ -42,6 +42,7 @@ export function render(
   markers: Marker[],
   dbPerDiv: number,
   refLevel: number,
+  freqRange: [number, number] | null = null,
 ): Promise<void> {
   if (view === 'smith') {
     return renderSmith(el, entries, markers);
@@ -101,6 +102,9 @@ export function render(
 
   const yRange: [number, number] | undefined =
     view === 'db' ? [refLevel - dbPerDiv * 8, refLevel + dbPerDiv * 2] : undefined;
+  const xRange: [number, number] | undefined = freqRange
+    ? [freqRange[0] / 1e6, freqRange[1] / 1e6]
+    : undefined;
 
   return Plotly.react(
     el,
@@ -108,7 +112,7 @@ export function render(
     {
       ...BASE_LAYOUT,
       title: plotTitle(entries, view),
-      xaxis: { ...AXIS_STYLE, title: { text: 'Frequency (MHz)' } },
+      xaxis: { ...AXIS_STYLE, title: { text: 'Frequency (MHz)' }, range: xRange },
       yaxis: { ...AXIS_STYLE, title: { text: yTitle }, range: yRange },
       shapes,
     },
