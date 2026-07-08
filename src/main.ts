@@ -1,5 +1,5 @@
 import { parse, toDB, toPhase, toVSWR } from './parser';
-import { render, PARAM_NAMES, type View, type ChartEntry, type Marker } from './chart';
+import { render, PARAM_NAMES, SINGLE_COLORS, type View, type ChartEntry, type Marker } from './chart';
 import type { TouchstoneData } from './parser';
 import './style.css';
 
@@ -23,6 +23,8 @@ let refLevel = 0;
 
 const mainEl = document.querySelector('main')!;
 const dropZone = document.getElementById('drop-zone')!;
+const scopeArea = document.getElementById('scope-area')!;
+const traceInfoBar = document.getElementById('trace-info-bar')!;
 const chartEl = document.getElementById('chart')!;
 const viewNav = document.getElementById('views')!;
 const fileBar = document.getElementById('file-bar')!;
@@ -54,7 +56,7 @@ function load(file: File): void {
     compareMode = false;
 
     dropZone.hidden = true;
-    chartEl.hidden = false;
+    scopeArea.hidden = false;
     viewNav.hidden = false;
     clearBtn.hidden = false;
     markersEl.hidden = false;
@@ -89,13 +91,14 @@ function reset(): void {
   scaleDivInput.value = String(dbPerDiv);
   scaleRefInput.value = String(refLevel);
   dropZone.hidden = false;
-  chartEl.hidden = true;
+  scopeArea.hidden = true;
   viewNav.hidden = true;
   fileBar.hidden = true;
   clearBtn.hidden = true;
   markersEl.hidden = true;
   compareBtn.hidden = true;
   scaleBar.hidden = true;
+  traceInfoBar.innerHTML = '';
   renderMarkerList();
 }
 
@@ -133,7 +136,54 @@ function activeEntries(): ChartEntry[] {
 function renderChart(): Promise<void> {
   const entries = activeEntries();
   if (entries.length === 0) return Promise.resolve();
+  renderTraceInfoBar(entries);
   return render(chartEl, entries, view, markers, dbPerDiv, refLevel);
+}
+
+function formatLabel(v: View): string {
+  return v === 'db' ? 'dB Mag' : v === 'phase' ? 'Phase' : v === 'vswr' ? 'VSWR' : 'Smith Chart';
+}
+
+function renderTraceInfoBar(entries: ChartEntry[]): void {
+  traceInfoBar.innerHTML = '';
+  if (entries.length === 0) return;
+
+  const addChip = (color: string, text: string) => {
+    const chip = document.createElement('span');
+    chip.className = 'trace-info';
+    chip.innerHTML = `<span class="dot" style="background:${color}"></span>${text}`;
+    traceInfoBar.appendChild(chip);
+  };
+
+  const compare = entries.length > 1;
+  const label = formatLabel(view);
+  const scaleSuffix = view === 'db' ? ` · ${dbPerDiv}dB/ REF ${refLevel}dB` : '';
+
+  for (const entry of entries) {
+    if (view === 'smith') {
+      const name = compare ? entry.label : 'S11';
+      addChip(entry.color, `${name} · Smith Chart`);
+      continue;
+    }
+
+    let paramIdxs: number[];
+    if (compare) {
+      paramIdxs = entry.data.ports === 1 ? [0] : [0, 1];
+    } else {
+      const count = entry.data.ports === 1 ? 1 : 4;
+      paramIdxs = [];
+      for (let i = 0; i < count; i++) {
+        if (view === 'vswr' && i !== 0 && i !== 3) continue;
+        paramIdxs.push(i);
+      }
+    }
+
+    for (const i of paramIdxs) {
+      const name = compare ? `${entry.label} · ${PARAM_NAMES[i]}` : PARAM_NAMES[i];
+      const color = compare ? entry.color : SINGLE_COLORS[i];
+      addChip(color, `${name} · ${label}${scaleSuffix}`);
+    }
+  }
 }
 
 function renderFileBar(): void {
