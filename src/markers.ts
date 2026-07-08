@@ -64,3 +64,72 @@ export function findNextPeak(
   }
   return null;
 }
+
+export interface BandwidthResult {
+  centerFreq: number;
+  bandwidth: number;
+  lowFreq: number;
+  highFreq: number;
+  q: number;
+}
+
+/**
+ * -N dB (default 3 dB) bandwidth around a peak: scans outward from the point
+ * nearest `peakFreq` until the value drops below `peakValue - thresholdDb` on
+ * each side, linearly interpolating between the bracketing samples for
+ * sub-sample-step accuracy. Returns null if either side never crosses the
+ * threshold within the data (peak too close to a data boundary) rather than
+ * fabricating an edge value.
+ */
+export function findBandwidth(
+  points: DataPoint[],
+  param: number,
+  valueFn: (c: Complex) => number,
+  peakFreq: number,
+  thresholdDb = 3,
+): BandwidthResult | null {
+  if (points.length < 2) return null;
+  const values = points.map((p) => valueFn(p.params[param]));
+
+  let peakIdx = 0;
+  let minDist = Infinity;
+  for (let i = 0; i < points.length; i++) {
+    const d = Math.abs(points[i].freq - peakFreq);
+    if (d < minDist) {
+      minDist = d;
+      peakIdx = i;
+    }
+  }
+
+  const target = values[peakIdx] - thresholdDb;
+
+  let lowFreq: number | null = null;
+  for (let i = peakIdx; i > 0; i--) {
+    if (values[i - 1] < target && values[i] >= target) {
+      const frac = (target - values[i - 1]) / (values[i] - values[i - 1]);
+      lowFreq = points[i - 1].freq + frac * (points[i].freq - points[i - 1].freq);
+      break;
+    }
+  }
+
+  let highFreq: number | null = null;
+  for (let i = peakIdx; i < points.length - 1; i++) {
+    if (values[i + 1] < target && values[i] >= target) {
+      const frac = (values[i] - target) / (values[i] - values[i + 1]);
+      highFreq = points[i].freq + frac * (points[i + 1].freq - points[i].freq);
+      break;
+    }
+  }
+
+  if (lowFreq === null || highFreq === null) return null;
+
+  const bandwidth = highFreq - lowFreq;
+  const centerFreq = (lowFreq + highFreq) / 2;
+  return {
+    centerFreq,
+    bandwidth,
+    lowFreq,
+    highFreq,
+    q: bandwidth > 0 ? centerFreq / bandwidth : Infinity,
+  };
+}

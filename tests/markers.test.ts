@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { findPeak, findMin, findNextPeak } from '../src/markers';
+import { findPeak, findMin, findNextPeak, findBandwidth } from '../src/markers';
 import type { DataPoint, Complex } from '../src/parser';
 
 function pointsFromValues(values: number[]): DataPoint[] {
@@ -61,5 +61,34 @@ describe('findNextPeak', () => {
     const wiggle = pointsFromValues([10, 9, 8, 7, 6, 5.9, 6.05, 5.8, 5, 4, 3, 2, 1, 0]);
     const result = findNextPeak(wiggle, 0, valueFn, wiggle[0].freq, 'right', 1);
     expect(result?.freq).toBe(6 * 1e6);
+  });
+});
+
+describe('findBandwidth', () => {
+  // Symmetric peak (value 10 at index 5) crossing -3dB (target 7) between
+  // indices 3-4 on the left and 6-7 on the right — hand-computed crossings
+  // below to check the linear interpolation.
+  const peak = pointsFromValues([0, 0, 0, 4, 8, 10, 8, 4, 0, 0, 0]);
+
+  it('interpolates the -3dB band edges around a peak', () => {
+    const result = findBandwidth(peak, 0, valueFn, peak[5].freq, 3);
+    expect(result).not.toBeNull();
+    expect(result!.lowFreq).toBeCloseTo(3.75e6);
+    expect(result!.highFreq).toBeCloseTo(6.25e6);
+    expect(result!.centerFreq).toBeCloseTo(5e6);
+    expect(result!.bandwidth).toBeCloseTo(2.5e6);
+    expect(result!.q).toBeCloseTo(2);
+  });
+
+  it('widens the reported bandwidth for a larger threshold', () => {
+    const narrow = findBandwidth(peak, 0, valueFn, peak[5].freq, 3)!;
+    const wide = findBandwidth(peak, 0, valueFn, peak[5].freq, 6)!;
+    expect(wide.bandwidth).toBeGreaterThan(narrow.bandwidth);
+  });
+
+  it('returns null when the peak is too close to a data boundary to bracket one side', () => {
+    const edgePeak = pointsFromValues([10, 8, 6, 4, 2, 0]);
+    const result = findBandwidth(edgePeak, 0, valueFn, edgePeak[0].freq, 3);
+    expect(result).toBeNull();
   });
 });

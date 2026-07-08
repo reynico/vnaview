@@ -388,6 +388,46 @@ main.dropping::after {
   z-index: 5;
 }
 
+/* Bandwidth / Q readout overlay */
+#bw-overlay {
+  position: absolute;
+  bottom: 0.5rem;
+  left: 0.5rem;
+  background: rgba(24, 24, 27, 0.9);
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  padding: 0.3rem 0.55rem;
+  font-family: monospace;
+  font-size: 0.72rem;
+  color: var(--marker);
+  z-index: 5;
+}
+
+.rail-input-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.68rem;
+  color: var(--muted);
+  margin-top: 0.1rem;
+}
+
+.rail-input-label input {
+  width: 100%;
+  padding: 0.15rem 0.35rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.2rem;
+  color: var(--text);
+  font-family: monospace;
+  font-size: 0.75rem;
+}
+
+.rail-input-label input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 #marker-delta-toggle.active {
   background: var(--marker);
   border-color: var(--marker);

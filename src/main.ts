@@ -1,6 +1,6 @@
 import { parse, toDB, toPhase, toVSWR } from './parser';
 import { render, PARAM_NAMES, SINGLE_COLORS, type View, type ChartEntry, type Marker } from './chart';
-import { findPeak, findMin, findNextPeak } from './markers';
+import { findPeak, findMin, findNextPeak, findBandwidth, type BandwidthResult } from './markers';
 import type { TouchstoneData, Complex } from './parser';
 import './style.css';
 
@@ -55,6 +55,9 @@ const searchNextRightBtn = document.getElementById('search-next-right') as HTMLB
 const markerNewCenterBtn = document.getElementById('marker-new-center') as HTMLButtonElement;
 const markerClearActiveBtn = document.getElementById('marker-clear-active') as HTMLButtonElement;
 const markerClearAllBtn = document.getElementById('marker-clear-all') as HTMLButtonElement;
+const bwSearchBtn = document.getElementById('bw-search') as HTMLButtonElement;
+const bwThresholdInput = document.getElementById('bw-threshold') as HTMLInputElement;
+const bwOverlay = document.getElementById('bw-overlay')!;
 
 function nextColor(): string {
   return FILE_COLORS[files.length % FILE_COLORS.length];
@@ -124,6 +127,7 @@ function reset(): void {
   scaleBar.hidden = true;
   freqBar.hidden = true;
   softkeyRail.hidden = true;
+  bwOverlay.hidden = true;
   traceInfoBar.innerHTML = '';
   renderMarkerTable();
 }
@@ -348,6 +352,17 @@ function updateRailState(): void {
   markerNewCenterBtn.disabled = !hasFile;
   markerClearActiveBtn.disabled = !hasActive;
   markerClearAllBtn.disabled = markers.length === 0;
+  bwSearchBtn.disabled = !(hasFile && hasActive && view === 'db' && !compareMode);
+}
+
+function renderBwOverlay(result: BandwidthResult | null, thresholdDb: number): void {
+  bwOverlay.hidden = false;
+  if (!result) {
+    bwOverlay.textContent = 'BW: N/A (peak too close to data edge)';
+    return;
+  }
+  const q = Number.isFinite(result.q) ? result.q.toFixed(1) : '—';
+  bwOverlay.textContent = `BW ${(result.bandwidth / 1e3).toFixed(1)} kHz · CTR ${(result.centerFreq / 1e6).toFixed(3)} MHz · Q ${q} · -${thresholdDb}dB`;
 }
 
 function renderMarkerTable(): void {
@@ -525,6 +540,7 @@ viewNav.querySelectorAll<HTMLButtonElement>('button').forEach((btn) => {
     viewNav.querySelectorAll('button').forEach((b) => b.classList.remove('active'));
     btn.classList.add('active');
     updateScaleBarVisibility();
+    bwOverlay.hidden = true;
     renderMarkerTable();
     renderChart();
   });
@@ -533,6 +549,7 @@ viewNav.querySelectorAll<HTMLButtonElement>('button').forEach((btn) => {
 compareBtn.addEventListener('click', () => {
   compareMode = !compareMode;
   compareBtn.classList.toggle('active', compareMode);
+  bwOverlay.hidden = true;
   renderFileBar();
   renderMarkerTable();
   renderChart();
@@ -636,6 +653,22 @@ markerClearAllBtn.addEventListener('click', () => {
   markers.length = 0;
   activeMarkerId = null;
   deltaRefId = null;
+  bwOverlay.hidden = true;
+  renderMarkerTable();
+  renderChart();
+});
+
+bwSearchBtn.addEventListener('click', () => {
+  const m = activeMarkerObj();
+  const f = files.find((f) => f.name === activeFile);
+  if (!m || !f || view !== 'db') return;
+  const threshold = parseFloat(bwThresholdInput.value);
+  if (!Number.isFinite(threshold) || threshold <= 0) return;
+
+  const peakPt = findPeak(f.data.points, m.param, toDB);
+  m.freq = peakPt.freq;
+  const result = findBandwidth(f.data.points, m.param, toDB, peakPt.freq, threshold);
+  renderBwOverlay(result, threshold);
   renderMarkerTable();
   renderChart();
 });
