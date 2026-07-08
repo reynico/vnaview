@@ -18,6 +18,8 @@ let compareMode = false;
 let view: View = 'db';
 const markers: Marker[] = [];
 let nextMarkerId = 1;
+let dbPerDiv = 10;
+let refLevel = 0;
 
 const mainEl = document.querySelector('main')!;
 const dropZone = document.getElementById('drop-zone')!;
@@ -29,6 +31,10 @@ const compareBtn = document.getElementById('compare')!;
 const clearBtn = document.getElementById('clear')!;
 const markersEl = document.getElementById('markers')!;
 const markerList = document.getElementById('marker-list')!;
+const scaleBar = document.getElementById('scale-bar')!;
+const scaleDivInput = document.getElementById('scale-div') as HTMLInputElement;
+const scaleRefInput = document.getElementById('scale-ref') as HTMLInputElement;
+const scaleAutoBtn = document.getElementById('scale-auto')!;
 
 function nextColor(): string {
   return FILE_COLORS[files.length % FILE_COLORS.length];
@@ -54,6 +60,7 @@ function load(file: File): void {
     markersEl.hidden = false;
 
     renderFileBar();
+    updateScaleBarVisibility();
     renderChart().then(attachClickListener);
   };
   reader.readAsText(file);
@@ -77,6 +84,10 @@ function reset(): void {
   compareMode = false;
   markers.length = 0;
   nextMarkerId = 1;
+  dbPerDiv = 10;
+  refLevel = 0;
+  scaleDivInput.value = String(dbPerDiv);
+  scaleRefInput.value = String(refLevel);
   dropZone.hidden = false;
   chartEl.hidden = true;
   viewNav.hidden = true;
@@ -84,7 +95,31 @@ function reset(): void {
   clearBtn.hidden = true;
   markersEl.hidden = true;
   compareBtn.hidden = true;
+  scaleBar.hidden = true;
   renderMarkerList();
+}
+
+function updateScaleBarVisibility(): void {
+  scaleBar.hidden = files.length === 0 || view !== 'db';
+}
+
+function autoscaleOnce(): void {
+  const entries = activeEntries();
+  if (entries.length === 0) return;
+  let maxVal = -Infinity;
+  for (const { data } of entries) {
+    const count = compareMode ? (data.ports === 1 ? 1 : 2) : data.ports === 1 ? 1 : 4;
+    for (let i = 0; i < count; i++) {
+      for (const p of data.points) {
+        const v = toDB(p.params[i]);
+        if (Number.isFinite(v) && v > maxVal) maxVal = v;
+      }
+    }
+  }
+  if (!Number.isFinite(maxVal)) return;
+  refLevel = Math.ceil(maxVal / dbPerDiv) * dbPerDiv;
+  scaleRefInput.value = String(refLevel);
+  renderChart();
 }
 
 function activeEntries(): ChartEntry[] {
@@ -98,7 +133,7 @@ function activeEntries(): ChartEntry[] {
 function renderChart(): Promise<void> {
   const entries = activeEntries();
   if (entries.length === 0) return Promise.resolve();
-  return render(chartEl, entries, view, markers);
+  return render(chartEl, entries, view, markers, dbPerDiv, refLevel);
 }
 
 function renderFileBar(): void {
@@ -241,6 +276,7 @@ viewNav.querySelectorAll<HTMLButtonElement>('button').forEach((btn) => {
     view = btn.dataset.view as View;
     viewNav.querySelectorAll('button').forEach((b) => b.classList.remove('active'));
     btn.classList.add('active');
+    updateScaleBarVisibility();
     renderMarkerList();
     renderChart();
   });
@@ -255,3 +291,21 @@ compareBtn.addEventListener('click', () => {
 });
 
 clearBtn.addEventListener('click', reset);
+
+scaleDivInput.addEventListener('change', () => {
+  const v = parseFloat(scaleDivInput.value);
+  if (Number.isFinite(v) && v > 0) {
+    dbPerDiv = v;
+    renderChart();
+  }
+});
+
+scaleRefInput.addEventListener('change', () => {
+  const v = parseFloat(scaleRefInput.value);
+  if (Number.isFinite(v)) {
+    refLevel = v;
+    renderChart();
+  }
+});
+
+scaleAutoBtn.addEventListener('click', autoscaleOnce);

@@ -28,6 +28,11 @@
       <div id="file-bar" hidden>
         <div id="file-chips"></div>
       </div>
+      <div id="scale-bar" hidden>
+        <label>dB/DIV <input id="scale-div" type="number" value="10" step="1" min="1" /></label>
+        <label>REF <input id="scale-ref" type="number" value="0" step="1" /></label>
+        <button id="scale-auto">Autoscale</button>
+      </div>
       <main>
         <div id="drop-zone">
           <p>Drop a .s1p or .s2p file</p>

@@ -111,6 +111,41 @@ button.active {
   gap: 0.35rem;
 }
 
+/* Scale bar */
+#scale-bar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.35rem 1rem;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+#scale-bar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-family: monospace;
+}
+
+#scale-bar input {
+  width: 4.5rem;
+  padding: 0.15rem 0.35rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.2rem;
+  color: var(--text);
+  font-family: monospace;
+  font-size: 0.75rem;
+}
+
+#scale-bar input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 .file-chip {
   display: inline-flex;
   align-items: center;
