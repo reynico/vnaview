@@ -9,8 +9,15 @@ export interface ChartEntry {
   data: TouchstoneData;
 }
 
-const SINGLE_COLORS = ['#38bdf8', '#fb923c', '#4ade80', '#f472b6'];
-const PARAM_NAMES = ['S11', 'S21', 'S12', 'S22'];
+export interface Marker {
+  id: number;
+  freq: number;
+  /** Index into a point's params[] (0=S11, 1=S21, 2=S12, 3=S22). */
+  param: number;
+}
+
+export const SINGLE_COLORS = ['#38bdf8', '#fb923c', '#4ade80', '#f472b6'];
+export const PARAM_NAMES = ['S11', 'S21', 'S12', 'S22'];
 
 const BASE_LAYOUT: Partial<Plotly.Layout> = {
   paper_bgcolor: '#0f0f10',
@@ -32,7 +39,7 @@ export function render(
   el: HTMLElement,
   entries: ChartEntry[],
   view: View,
-  markers: number[],
+  markers: Marker[],
 ): Promise<void> {
   if (view === 'smith') {
     return renderSmith(el, entries, markers);
@@ -80,10 +87,10 @@ export function render(
   const yTitle =
     view === 'db' ? 'Magnitude (dB)' : view === 'phase' ? 'Phase (°)' : 'VSWR';
 
-  const shapes: Partial<Plotly.Shape>[] = markers.map((f) => ({
+  const shapes: Partial<Plotly.Shape>[] = markers.map((m) => ({
     type: 'line',
-    x0: f / 1e6,
-    x1: f / 1e6,
+    x0: m.freq / 1e6,
+    x1: m.freq / 1e6,
     y0: 0,
     y1: 1,
     yref: 'paper' as const,
@@ -107,14 +114,14 @@ export function render(
 function renderSmith(
   el: HTMLElement,
   entries: ChartEntry[],
-  markers: number[],
+  markers: Marker[],
 ): Promise<void> {
   const traces: Plotly.Data[] = [...smithGrid()];
 
   for (const { label, color, data } of entries) {
-    const markerPoints = markers.map((f) => {
-      const pt = data.points.find((p) => p.freq >= f) ?? data.points[data.points.length - 1];
-      return { x: pt.params[0].re, y: pt.params[0].im, label: `${(f / 1e6).toFixed(3)} MHz` };
+    const markerPoints = markers.map((m) => {
+      const pt = data.points.find((p) => p.freq >= m.freq) ?? data.points[data.points.length - 1];
+      return { x: pt.params[0].re, y: pt.params[0].im, label: `${(m.freq / 1e6).toFixed(3)} MHz` };
     });
 
     traces.push({

@@ -1,5 +1,5 @@
 import { parse, toDB, toPhase, toVSWR } from './parser';
-import { render, type View, type ChartEntry } from './chart';
+import { render, PARAM_NAMES, type View, type ChartEntry, type Marker } from './chart';
 import type { TouchstoneData } from './parser';
 import './style.css';
 
@@ -10,12 +10,14 @@ interface LoadedFile {
 }
 
 const FILE_COLORS = ['#38bdf8', '#fb923c', '#4ade80', '#f472b6', '#a78bfa', '#34d399', '#fbbf24', '#f87171'];
+const MAX_MARKERS = 6;
 
 let files: LoadedFile[] = [];
 let activeFile: string | null = null;
 let compareMode = false;
 let view: View = 'db';
-const markers: number[] = [];
+const markers: Marker[] = [];
+let nextMarkerId = 1;
 
 const mainEl = document.querySelector('main')!;
 const dropZone = document.getElementById('drop-zone')!;
@@ -74,6 +76,7 @@ function reset(): void {
   activeFile = null;
   compareMode = false;
   markers.length = 0;
+  nextMarkerId = 1;
   dropZone.hidden = false;
   chartEl.hidden = true;
   viewNav.hidden = true;
@@ -127,29 +130,32 @@ function renderFileBar(): void {
   }
 }
 
-function markerValue(freqHz: number): string {
+function markerValue(marker: Marker): string {
   if (compareMode) return '';
   const f = files.find((f) => f.name === activeFile);
   if (!f) return '';
   const pt = f.data.points.reduce((a, b) =>
-    Math.abs(b.freq - freqHz) < Math.abs(a.freq - freqHz) ? b : a,
+    Math.abs(b.freq - marker.freq) < Math.abs(a.freq - marker.freq) ? b : a,
   );
-  if (view === 'db') return `${toDB(pt.params[0]).toFixed(2)} dB`;
-  if (view === 'phase') return `${toPhase(pt.params[0]).toFixed(1)}°`;
-  if (view === 'vswr') return `VSWR ${toVSWR(pt.params[0]).toFixed(2)}`;
+  const c = pt.params[marker.param];
+  if (!c) return '';
+  if (view === 'db') return `${toDB(c).toFixed(2)} dB`;
+  if (view === 'phase') return `${toPhase(c).toFixed(1)}°`;
+  if (view === 'vswr') return `VSWR ${toVSWR(c).toFixed(2)}`;
   return '';
 }
 
 function renderMarkerList(): void {
   markerList.innerHTML = '';
-  for (const freq of markers) {
+  for (const m of markers) {
     const tag = document.createElement('span');
     tag.className = 'marker-tag';
-    const val = markerValue(freq);
-    tag.textContent = `${(freq / 1e6).toFixed(3)} MHz${val ? ` · ${val}` : ''} ×`;
+    const val = markerValue(m);
+    tag.textContent = `${(m.freq / 1e6).toFixed(3)} MHz${val ? ` · ${val}` : ''} ×`;
     tag.title = 'Click to remove';
     tag.onclick = () => {
-      markers.splice(markers.indexOf(freq), 1);
+      const idx = markers.findIndex((x) => x.id === m.id);
+      if (idx >= 0) markers.splice(idx, 1);
       renderMarkerList();
       renderChart();
     };
@@ -170,6 +176,7 @@ function attachClickListener(): void {
     if (!pt) return;
 
     let freqHz: number;
+    let param = 0;
     if (view === 'smith') {
       const ref = compareMode ? files[0] : files.find((f) => f.name === activeFile);
       if (!ref) return;
@@ -182,11 +189,14 @@ function attachClickListener(): void {
       freqHz = closest.freq;
     } else {
       freqHz = (pt.x as number) * 1e6;
+      const name = pt.data.name as string;
+      const idx = PARAM_NAMES.findIndex((n) => name.includes(n));
+      param = idx >= 0 ? idx : 0;
     }
 
-    if (!markers.includes(freqHz)) {
-      markers.push(freqHz);
-      markers.sort((a, b) => a - b);
+    if (!markers.some((m) => m.freq === freqHz && m.param === param)) {
+      if (markers.length >= MAX_MARKERS) markers.shift();
+      markers.push({ id: nextMarkerId++, freq: freqHz, param });
       renderMarkerList();
       renderChart();
     }
