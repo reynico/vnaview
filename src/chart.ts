@@ -43,9 +43,11 @@ export function render(
   dbPerDiv: number,
   refLevel: number,
   freqRange: [number, number] | null = null,
+  activeMarkerId: number | null = null,
+  deltaRefId: number | null = null,
 ): Promise<void> {
   if (view === 'smith') {
-    return renderSmith(el, entries, markers);
+    return renderSmith(el, entries, markers, activeMarkerId, deltaRefId);
   }
 
   const compare = entries.length > 1;
@@ -92,7 +94,9 @@ export function render(
     for (const i of paramsToPlot) {
       const paramMarkers = markers.filter((m) => m.param === i);
       if (paramMarkers.length === 0) continue;
-      traces.push(markerGlyphTrace(paramMarkers, markers, data.points, fn, i));
+      traces.push(
+        markerGlyphTrace(paramMarkers, markers, data.points, fn, i, activeMarkerId, deltaRefId),
+      );
     }
   }
 
@@ -129,16 +133,29 @@ export function render(
   ).then(() => Plotly.Plots.resize(el));
 }
 
+const MARKER_COLOR = '#facc15';
+const MARKER_ACTIVE_COLOR = '#f8fafc';
+const MARKER_DELTA_REF_COLOR = '#f472b6';
+
+function glyphColor(markerId: number, activeMarkerId: number | null, deltaRefId: number | null): string {
+  if (markerId === deltaRefId) return MARKER_DELTA_REF_COLOR;
+  if (markerId === activeMarkerId) return MARKER_ACTIVE_COLOR;
+  return MARKER_COLOR;
+}
+
 function markerGlyphTrace(
   paramMarkers: Marker[],
   allMarkers: Marker[],
   points: DataPoint[],
   fn: (c: Complex) => number,
   param: number,
+  activeMarkerId: number | null,
+  deltaRefId: number | null,
 ): Plotly.Data {
   const x: number[] = [];
   const y: number[] = [];
   const text: string[] = [];
+  const colors: string[] = [];
 
   for (const m of paramMarkers) {
     const pt = points.reduce((a, b) =>
@@ -147,6 +164,7 @@ function markerGlyphTrace(
     x.push(pt.freq / 1e6);
     y.push(fn(pt.params[param]));
     text.push(String(allMarkers.indexOf(m) + 1));
+    colors.push(glyphColor(m.id, activeMarkerId, deltaRefId));
   }
 
   return {
@@ -154,10 +172,10 @@ function markerGlyphTrace(
     y,
     type: 'scatter',
     mode: 'text+markers',
-    marker: { symbol: 'triangle-up', size: 10, color: '#facc15', line: { width: 1, color: '#000' } },
+    marker: { symbol: 'triangle-up', size: 10, color: colors, line: { width: 1, color: '#000' } },
     text,
     textposition: 'top center',
-    textfont: { color: '#facc15', size: 10 },
+    textfont: { color: colors, size: 10 },
     hoverinfo: 'skip',
     showlegend: false,
   };
@@ -167,6 +185,8 @@ function renderSmith(
   el: HTMLElement,
   entries: ChartEntry[],
   markers: Marker[],
+  activeMarkerId: number | null = null,
+  deltaRefId: number | null = null,
 ): Promise<void> {
   const traces: Plotly.Data[] = [...smithGrid()];
 
@@ -178,6 +198,7 @@ function renderSmith(
         y: pt.params[0].im,
         num: String(idx + 1),
         hover: `${idx + 1} · ${(m.freq / 1e6).toFixed(3)} MHz`,
+        color: glyphColor(m.id, activeMarkerId, deltaRefId),
       };
     });
 
@@ -199,9 +220,14 @@ function renderSmith(
         hovertext: markerPoints.map((p) => p.hover),
         type: 'scatter',
         mode: 'text+markers',
-        marker: { symbol: 'triangle-up', color: '#facc15', size: 10, line: { width: 1, color: '#000' } },
+        marker: {
+          symbol: 'triangle-up',
+          color: markerPoints.map((p) => p.color),
+          size: 10,
+          line: { width: 1, color: '#000' },
+        },
         textposition: 'top center',
-        textfont: { color: '#facc15', size: 10 },
+        textfont: { color: markerPoints.map((p) => p.color), size: 10 },
         showlegend: false,
         hoverinfo: 'text',
       });

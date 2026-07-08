@@ -340,6 +340,34 @@ main.dropping::after {
   z-index: 5;
 }
 
+#marker-overlay-header {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.2rem;
+}
+
+#marker-delta-toggle {
+  padding: 0.05rem 0.4rem;
+  font-size: 0.7rem;
+  line-height: 1.3;
+}
+
+#marker-delta-toggle:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+#marker-delta-toggle:disabled:hover {
+  border-color: var(--border);
+  color: var(--muted);
+}
+
+#marker-delta-toggle.active {
+  background: var(--marker);
+  border-color: var(--marker);
+  color: #000;
+}
+
 #marker-table {
   border-collapse: collapse;
   font-family: monospace;
@@ -357,6 +385,22 @@ main.dropping::after {
   padding: 0.1rem 0.5rem;
   color: var(--marker);
   white-space: nowrap;
+}
+
+#marker-table tbody tr {
+  cursor: pointer;
+}
+
+#marker-table tbody tr.active {
+  background: rgba(56, 189, 248, 0.12);
+}
+
+#marker-table tbody tr.delta-ref td {
+  color: var(--marker);
+}
+
+#marker-table tbody tr.delta-ref .marker-num {
+  color: #f472b6 !important;
 }
 
 .marker-num {

@@ -18,6 +18,8 @@ let compareMode = false;
 let view: View = 'db';
 const markers: Marker[] = [];
 let nextMarkerId = 1;
+let activeMarkerId: number | null = null;
+let deltaRefId: number | null = null;
 let dbPerDiv = 10;
 let refLevel = 0;
 let freqRange: [number, number] | null = null;
@@ -34,6 +36,7 @@ const compareBtn = document.getElementById('compare')!;
 const clearBtn = document.getElementById('clear')!;
 const markerOverlay = document.getElementById('marker-overlay')!;
 const markerTableBody = document.querySelector('#marker-table tbody')!;
+const markerDeltaToggle = document.getElementById('marker-delta-toggle') as HTMLButtonElement;
 const scaleBar = document.getElementById('scale-bar')!;
 const scaleDivInput = document.getElementById('scale-div') as HTMLInputElement;
 const scaleRefInput = document.getElementById('scale-ref') as HTMLInputElement;
@@ -94,6 +97,8 @@ function reset(): void {
   compareMode = false;
   markers.length = 0;
   nextMarkerId = 1;
+  activeMarkerId = null;
+  deltaRefId = null;
   dbPerDiv = 10;
   refLevel = 0;
   freqRange = null;
@@ -147,7 +152,7 @@ function renderChart(): Promise<void> {
   if (entries.length === 0) return Promise.resolve();
   renderTraceInfoBar(entries);
   renderFreqBar(entries);
-  return render(chartEl, entries, view, markers, dbPerDiv, refLevel, freqRange);
+  return render(chartEl, entries, view, markers, dbPerDiv, refLevel, freqRange, activeMarkerId, deltaRefId);
 }
 
 function dataExtent(entries: ChartEntry[]): [number, number] | null {
@@ -265,46 +270,90 @@ function renderFileBar(): void {
   }
 }
 
-function markerValue(marker: Marker): string {
-  if (compareMode) return '';
+function markerRawValue(marker: Marker): number | null {
+  if (compareMode) return null;
   const f = files.find((f) => f.name === activeFile);
-  if (!f) return '';
+  if (!f) return null;
   const pt = f.data.points.reduce((a, b) =>
     Math.abs(b.freq - marker.freq) < Math.abs(a.freq - marker.freq) ? b : a,
   );
   const c = pt.params[marker.param];
-  if (!c) return '';
-  if (view === 'db') return `${toDB(c).toFixed(2)} dB`;
-  if (view === 'phase') return `${toPhase(c).toFixed(1)}°`;
-  if (view === 'vswr') return `VSWR ${toVSWR(c).toFixed(2)}`;
+  if (!c) return null;
+  if (view === 'db') return toDB(c);
+  if (view === 'phase') return toPhase(c);
+  if (view === 'vswr') return toVSWR(c);
+  return null;
+}
+
+function formatMarkerValue(raw: number | null): string {
+  if (raw === null) return '';
+  if (view === 'db') return `${raw.toFixed(2)} dB`;
+  if (view === 'phase') return `${raw.toFixed(1)}°`;
+  if (view === 'vswr') return `VSWR ${raw.toFixed(2)}`;
   return '';
+}
+
+function formatDeltaValue(raw: number): string {
+  const sign = raw >= 0 ? '+' : '';
+  if (view === 'db') return `${sign}${raw.toFixed(2)} dB`;
+  if (view === 'phase') return `${sign}${raw.toFixed(1)}°`;
+  if (view === 'vswr') return `${sign}${raw.toFixed(2)}`;
+  return '';
+}
+
+function markerValue(marker: Marker): string {
+  return formatMarkerValue(markerRawValue(marker));
 }
 
 function renderMarkerTable(): void {
   markerOverlay.hidden = markers.length === 0;
   markerTableBody.innerHTML = '';
 
+  markerDeltaToggle.disabled = activeMarkerId === null;
+  markerDeltaToggle.classList.toggle('active', activeMarkerId !== null && activeMarkerId === deltaRefId);
+
+  const ref = deltaRefId !== null ? markers.find((m) => m.id === deltaRefId) ?? null : null;
+
   markers.forEach((m, idx) => {
     const row = document.createElement('tr');
+    row.className = [m.id === activeMarkerId ? 'active' : '', m.id === deltaRefId ? 'delta-ref' : '']
+      .filter(Boolean)
+      .join(' ');
+    row.onclick = () => {
+      activeMarkerId = m.id;
+      renderMarkerTable();
+      renderChart();
+    };
 
     const numCell = document.createElement('td');
     numCell.className = 'marker-num';
     numCell.textContent = String(idx + 1);
 
     const freqCell = document.createElement('td');
-    freqCell.textContent = `${(m.freq / 1e6).toFixed(3)} MHz`;
-
     const valCell = document.createElement('td');
-    valCell.textContent = markerValue(m);
+
+    if (ref && ref.id !== m.id) {
+      const dFreqMHz = (m.freq - ref.freq) / 1e6;
+      freqCell.textContent = `${dFreqMHz >= 0 ? '+' : ''}${dFreqMHz.toFixed(3)} MHz`;
+      const rawM = markerRawValue(m);
+      const rawRef = markerRawValue(ref);
+      valCell.textContent = rawM !== null && rawRef !== null ? formatDeltaValue(rawM - rawRef) : '';
+    } else {
+      freqCell.textContent = `${(m.freq / 1e6).toFixed(3)} MHz`;
+      valCell.textContent = markerValue(m);
+    }
 
     const removeCell = document.createElement('td');
     const removeBtn = document.createElement('button');
     removeBtn.className = 'marker-remove';
     removeBtn.textContent = '×';
     removeBtn.title = 'Remove marker';
-    removeBtn.onclick = () => {
+    removeBtn.onclick = (e) => {
+      e.stopPropagation();
       const i = markers.findIndex((x) => x.id === m.id);
       if (i >= 0) markers.splice(i, 1);
+      if (activeMarkerId === m.id) activeMarkerId = null;
+      if (deltaRefId === m.id) deltaRefId = null;
       renderMarkerTable();
       renderChart();
     };
@@ -362,8 +411,14 @@ function attachClickListener(): void {
     }
 
     if (!markers.some((m) => m.freq === freqHz && m.param === param)) {
-      if (markers.length >= MAX_MARKERS) markers.shift();
-      markers.push({ id: nextMarkerId++, freq: freqHz, param });
+      if (markers.length >= MAX_MARKERS) {
+        const evicted = markers.shift()!;
+        if (activeMarkerId === evicted.id) activeMarkerId = null;
+        if (deltaRefId === evicted.id) deltaRefId = null;
+      }
+      const newMarker: Marker = { id: nextMarkerId++, freq: freqHz, param };
+      markers.push(newMarker);
+      activeMarkerId = newMarker.id;
       renderMarkerTable();
       renderChart();
     }
@@ -468,3 +523,10 @@ freqStartInput.addEventListener('change', applyStartStop);
 freqStopInput.addEventListener('change', applyStartStop);
 freqCenterInput.addEventListener('change', applyCenterSpan);
 freqSpanInput.addEventListener('change', applyCenterSpan);
+
+markerDeltaToggle.addEventListener('click', () => {
+  if (activeMarkerId === null) return;
+  deltaRefId = deltaRefId === activeMarkerId ? null : activeMarkerId;
+  renderMarkerTable();
+  renderChart();
+});
