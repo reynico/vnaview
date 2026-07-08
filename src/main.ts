@@ -10,7 +10,7 @@ interface LoadedFile {
   color: string;
 }
 
-const FILE_COLORS = ['#38bdf8', '#fb923c', '#4ade80', '#f472b6', '#a78bfa', '#34d399', '#fbbf24', '#f87171'];
+const FILE_COLORS = ['#33ff33', '#ffb000', '#7dffb2', '#ff5533', '#c8ff33', '#ffdd55', '#33ffcc', '#ff8855'];
 const MAX_MARKERS = 6;
 
 let files: LoadedFile[] = [];

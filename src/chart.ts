@@ -16,24 +16,64 @@ export interface Marker {
   param: number;
 }
 
-export const SINGLE_COLORS = ['#38bdf8', '#fb923c', '#4ade80', '#f472b6'];
+export const SINGLE_COLORS = ['#33ff33', '#ffb000', '#7dffb2', '#ff5533'];
 export const PARAM_NAMES = ['S11', 'S21', 'S12', 'S22'];
 
-const BASE_LAYOUT: Partial<Plotly.Layout> = {
-  paper_bgcolor: '#0f0f10',
-  plot_bgcolor: '#0f0f10',
-  font: { color: '#e4e4e7', size: 12, family: 'system-ui, sans-serif' },
-  margin: { t: 36, r: 16, b: 52, l: 68 },
-  showlegend: false,
-  hovermode: 'x unified',
-};
+const MONO_FONT = "ui-monospace, 'SF Mono', 'Cascadia Code', 'JetBrains Mono', Consolas, monospace";
 
-const AXIS_STYLE: Partial<Plotly.LayoutAxis> = {
-  gridcolor: '#27272a',
-  zerolinecolor: '#3f3f46',
-  tickfont: { color: '#71717a' },
-  titlefont: { color: '#a1a1aa' },
-};
+// Colors are read from the CSS custom properties at render time so the
+// Plotly canvas stays in sync with style.css instead of duplicating hex
+// values that can drift out of sync with the theme.
+function theme() {
+  const cs = getComputedStyle(document.documentElement);
+  const read = (name: string, fallback: string) => cs.getPropertyValue(name).trim() || fallback;
+  return {
+    bg: read('--bg', '#050a05'),
+    border: read('--border', '#1f4620'),
+    muted: read('--muted', '#1f8f1f'),
+    text: read('--text', '#33ff33'),
+  };
+}
+
+function baseLayout(): Partial<Plotly.Layout> {
+  const t = theme();
+  return {
+    paper_bgcolor: t.bg,
+    plot_bgcolor: t.bg,
+    font: { color: t.text, size: 12, family: MONO_FONT },
+    margin: { t: 36, r: 16, b: 52, l: 68 },
+    showlegend: false,
+    hovermode: 'x unified',
+  };
+}
+
+// Fakes a CRT phosphor bloom: a wider, translucent duplicate of a trace drawn
+// behind it. Avoids a CSS filter/blur on the chart container, which would
+// also blur tick labels and the marker table sitting in the same subtree.
+function glowTrace(x: number[], y: number[], color: string, width: number): Plotly.Data {
+  return {
+    x,
+    y,
+    type: 'scatter',
+    mode: 'lines',
+    line: { color, width: width * 3.5 },
+    opacity: 0.25,
+    hoverinfo: 'skip',
+    showlegend: false,
+  };
+}
+
+function axisStyle(): Partial<Plotly.LayoutAxis> {
+  const t = theme();
+  return {
+    gridcolor: t.border,
+    gridwidth: 1.4,
+    zerolinecolor: t.muted,
+    zerolinewidth: 1.4,
+    tickfont: { color: t.muted },
+    titlefont: { color: t.text },
+  };
+}
 
 export function render(
   el: HTMLElement,
@@ -65,9 +105,11 @@ export function render(
       // S11 solid, S21 dashed (if 2-port)
       paramsToPlot = data.ports === 1 ? [0] : [0, 1];
       for (const i of paramsToPlot) {
+        const y = data.points.map((p) => fn(p.params[i]));
+        traces.push(glowTrace(freqs, y, color, 1.5));
         traces.push({
           x: freqs,
-          y: data.points.map((p) => fn(p.params[i])),
+          y,
           name: `${label} · ${PARAM_NAMES[i]}`,
           type: 'scatter',
           mode: 'lines',
@@ -80,9 +122,11 @@ export function render(
       for (let i = 0; i < count; i++) {
         if (view === 'vswr' && i !== 0 && i !== 3) continue;
         paramsToPlot.push(i);
+        const y = data.points.map((p) => fn(p.params[i]));
+        traces.push(glowTrace(freqs, y, SINGLE_COLORS[i], 1.5));
         traces.push({
           x: freqs,
-          y: data.points.map((p) => fn(p.params[i])),
+          y,
           name: PARAM_NAMES[i],
           type: 'scatter',
           mode: 'lines',
@@ -110,7 +154,7 @@ export function render(
     y0: 0,
     y1: 1,
     yref: 'paper' as const,
-    line: { color: '#facc15', width: 1, dash: 'dot' },
+    line: { color: MARKER_COLOR, width: 1, dash: 'dot' },
   }));
 
   const yRange: [number, number] | undefined =
@@ -123,19 +167,19 @@ export function render(
     el,
     traces,
     {
-      ...BASE_LAYOUT,
+      ...baseLayout(),
       title: plotTitle(entries, view),
-      xaxis: { ...AXIS_STYLE, title: { text: 'Frequency (MHz)' }, range: xRange },
-      yaxis: { ...AXIS_STYLE, title: { text: yTitle }, range: yRange },
+      xaxis: { ...axisStyle(), title: { text: 'Frequency (MHz)' }, range: xRange },
+      yaxis: { ...axisStyle(), title: { text: yTitle }, range: yRange },
       shapes,
     },
     { responsive: true },
   ).then(() => Plotly.Plots.resize(el));
 }
 
-const MARKER_COLOR = '#facc15';
+const MARKER_COLOR = '#ffe14d';
 const MARKER_ACTIVE_COLOR = '#f8fafc';
-const MARKER_DELTA_REF_COLOR = '#f472b6';
+const MARKER_DELTA_REF_COLOR = '#ff5ec2';
 
 function glyphColor(markerId: number, activeMarkerId: number | null, deltaRefId: number | null): string {
   if (markerId === deltaRefId) return MARKER_DELTA_REF_COLOR;
@@ -202,9 +246,12 @@ function renderSmith(
       };
     });
 
+    const smithX = data.points.map((p) => p.params[0].re);
+    const smithY = data.points.map((p) => p.params[0].im);
+    traces.push(glowTrace(smithX, smithY, color, 2));
     traces.push({
-      x: data.points.map((p) => p.params[0].re),
-      y: data.points.map((p) => p.params[0].im),
+      x: smithX,
+      y: smithY,
       text: data.points.map((p) => `${(p.freq / 1e6).toFixed(3)} MHz`),
       type: 'scatter',
       mode: 'lines',
@@ -238,17 +285,17 @@ function renderSmith(
     el,
     traces,
     {
-      ...BASE_LAYOUT,
+      ...baseLayout(),
       title: plotTitle(entries, 'smith'),
       hovermode: 'closest',
       xaxis: {
-        ...AXIS_STYLE,
+        ...axisStyle(),
         title: { text: 'Re(Γ)' },
         range: [-1.1, 1.1],
         scaleanchor: 'y',
         scaleratio: 1,
       },
-      yaxis: { ...AXIS_STYLE, title: { text: 'Im(Γ)' }, range: [-1.1, 1.1] },
+      yaxis: { ...axisStyle(), title: { text: 'Im(Γ)' }, range: [-1.1, 1.1] },
     },
     { responsive: true },
   ).then(() => Plotly.Plots.resize(el));
@@ -277,7 +324,7 @@ function plotTitle(entries: ChartEntry[], view: View) {
 
   return {
     text: `${files} · ${params}`,
-    font: { size: 12, color: '#52525b' },
+    font: { size: 12, color: theme().muted },
     x: 0.02,
     xanchor: 'left' as const,
     pad: { t: 4 },
@@ -318,7 +365,7 @@ function gridLine(x: number[], y: number[]): Plotly.Data {
     y,
     type: 'scatter',
     mode: 'lines',
-    line: { color: '#27272a', width: 0.8 },
+    line: { color: theme().border, width: 1 },
     hoverinfo: 'none',
     showlegend: false,
   };
