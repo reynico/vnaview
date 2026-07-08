@@ -33,40 +33,55 @@
         <label>REF <input id="scale-ref" type="number" value="0" step="1" /></label>
         <button id="scale-auto">Autoscale</button>
       </div>
-      <main>
-        <div id="drop-zone">
-          <p>Drop a .s1p or .s2p file</p>
-          <small>or click to browse</small>
-        </div>
-        <div id="scope-area" hidden>
-          <div id="trace-info-bar"></div>
-          <div id="chart-wrap">
-            <div id="chart"></div>
-            <div id="marker-overlay" hidden>
-              <div id="marker-overlay-header">
-                <button id="marker-delta-toggle" title="Set active marker as delta reference">Δ</button>
+      <div class="body-row">
+        <main>
+          <div id="drop-zone">
+            <p>Drop a .s1p or .s2p file</p>
+            <small>or click to browse</small>
+          </div>
+          <div id="scope-area" hidden>
+            <div id="trace-info-bar"></div>
+            <div id="chart-wrap">
+              <div id="chart"></div>
+              <div id="marker-overlay" hidden>
+                <table id="marker-table">
+                  <thead>
+                    <tr>
+                      <th></th>
+                      <th>Freq</th>
+                      <th>Value</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
               </div>
-              <table id="marker-table">
-                <thead>
-                  <tr>
-                    <th></th>
-                    <th>Freq</th>
-                    <th>Value</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody></tbody>
-              </table>
+            </div>
+            <div id="freq-bar" hidden>
+              <label>START <input id="freq-start" type="number" step="0.001" /> MHz</label>
+              <label>STOP <input id="freq-stop" type="number" step="0.001" /> MHz</label>
+              <label>CENTER <input id="freq-center" type="number" step="0.001" /> MHz</label>
+              <label>SPAN <input id="freq-span" type="number" step="0.001" /> MHz</label>
             </div>
           </div>
-          <div id="freq-bar" hidden>
-            <label>START <input id="freq-start" type="number" step="0.001" /> MHz</label>
-            <label>STOP <input id="freq-stop" type="number" step="0.001" /> MHz</label>
-            <label>CENTER <input id="freq-center" type="number" step="0.001" /> MHz</label>
-            <label>SPAN <input id="freq-span" type="number" step="0.001" /> MHz</label>
+        </main>
+        <aside id="softkey-rail" hidden>
+          <div class="rail-group">
+            <div class="rail-label">Search</div>
+            <button id="search-peak">Marker→Peak</button>
+            <button id="search-min">Marker→Min</button>
+            <button id="search-next-left">Peak Search ←</button>
+            <button id="search-next-right">Peak Search →</button>
           </div>
-        </div>
-      </main>
+          <div class="rail-group">
+            <div class="rail-label">Markers</div>
+            <button id="marker-delta-toggle">Δ Ref</button>
+            <button id="marker-new-center">New at Center</button>
+            <button id="marker-clear-active">Clear Active</button>
+            <button id="marker-clear-all">Clear All</button>
+          </div>
+        </aside>
+      </div>
     </div>
     <script type="module" src="main.ts"></script>
   </body>

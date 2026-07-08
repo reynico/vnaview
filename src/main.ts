@@ -1,6 +1,7 @@
 import { parse, toDB, toPhase, toVSWR } from './parser';
 import { render, PARAM_NAMES, SINGLE_COLORS, type View, type ChartEntry, type Marker } from './chart';
-import type { TouchstoneData } from './parser';
+import { findPeak, findMin, findNextPeak } from './markers';
+import type { TouchstoneData, Complex } from './parser';
 import './style.css';
 
 interface LoadedFile {
@@ -46,6 +47,14 @@ const freqStartInput = document.getElementById('freq-start') as HTMLInputElement
 const freqStopInput = document.getElementById('freq-stop') as HTMLInputElement;
 const freqCenterInput = document.getElementById('freq-center') as HTMLInputElement;
 const freqSpanInput = document.getElementById('freq-span') as HTMLInputElement;
+const softkeyRail = document.getElementById('softkey-rail')!;
+const searchPeakBtn = document.getElementById('search-peak') as HTMLButtonElement;
+const searchMinBtn = document.getElementById('search-min') as HTMLButtonElement;
+const searchNextLeftBtn = document.getElementById('search-next-left') as HTMLButtonElement;
+const searchNextRightBtn = document.getElementById('search-next-right') as HTMLButtonElement;
+const markerNewCenterBtn = document.getElementById('marker-new-center') as HTMLButtonElement;
+const markerClearActiveBtn = document.getElementById('marker-clear-active') as HTMLButtonElement;
+const markerClearAllBtn = document.getElementById('marker-clear-all') as HTMLButtonElement;
 
 function nextColor(): string {
   return FILE_COLORS[files.length % FILE_COLORS.length];
@@ -68,9 +77,11 @@ function load(file: File): void {
     scopeArea.hidden = false;
     viewNav.hidden = false;
     clearBtn.hidden = false;
+    softkeyRail.hidden = false;
 
     renderFileBar();
     updateScaleBarVisibility();
+    renderMarkerTable();
     renderChart().then(() => {
       attachClickListener();
       attachRelayoutListener();
@@ -112,6 +123,7 @@ function reset(): void {
   compareBtn.hidden = true;
   scaleBar.hidden = true;
   freqBar.hidden = true;
+  softkeyRail.hidden = true;
   traceInfoBar.innerHTML = '';
   renderMarkerTable();
 }
@@ -305,12 +317,46 @@ function markerValue(marker: Marker): string {
   return formatMarkerValue(markerRawValue(marker));
 }
 
+function activeMarkerObj(): Marker | undefined {
+  return markers.find((m) => m.id === activeMarkerId);
+}
+
+function currentValueFn(): (c: Complex) => number {
+  return view === 'phase' ? toPhase : view === 'vswr' ? toVSWR : toDB;
+}
+
+function addMarker(freq: number, param: number): Marker {
+  if (markers.length >= MAX_MARKERS) {
+    const evicted = markers.shift()!;
+    if (activeMarkerId === evicted.id) activeMarkerId = null;
+    if (deltaRefId === evicted.id) deltaRefId = null;
+  }
+  const newMarker: Marker = { id: nextMarkerId++, freq, param };
+  markers.push(newMarker);
+  activeMarkerId = newMarker.id;
+  return newMarker;
+}
+
+function updateRailState(): void {
+  const hasFile = files.length > 0;
+  const hasActive = activeMarkerId !== null;
+  const searchEnabled = hasFile && hasActive && view !== 'smith' && !compareMode;
+  searchPeakBtn.disabled = !searchEnabled;
+  searchMinBtn.disabled = !searchEnabled;
+  searchNextLeftBtn.disabled = !searchEnabled;
+  searchNextRightBtn.disabled = !searchEnabled;
+  markerNewCenterBtn.disabled = !hasFile;
+  markerClearActiveBtn.disabled = !hasActive;
+  markerClearAllBtn.disabled = markers.length === 0;
+}
+
 function renderMarkerTable(): void {
   markerOverlay.hidden = markers.length === 0;
   markerTableBody.innerHTML = '';
 
   markerDeltaToggle.disabled = activeMarkerId === null;
   markerDeltaToggle.classList.toggle('active', activeMarkerId !== null && activeMarkerId === deltaRefId);
+  updateRailState();
 
   const ref = deltaRefId !== null ? markers.find((m) => m.id === deltaRefId) ?? null : null;
 
@@ -411,14 +457,7 @@ function attachClickListener(): void {
     }
 
     if (!markers.some((m) => m.freq === freqHz && m.param === param)) {
-      if (markers.length >= MAX_MARKERS) {
-        const evicted = markers.shift()!;
-        if (activeMarkerId === evicted.id) activeMarkerId = null;
-        if (deltaRefId === evicted.id) deltaRefId = null;
-      }
-      const newMarker: Marker = { id: nextMarkerId++, freq: freqHz, param };
-      markers.push(newMarker);
-      activeMarkerId = newMarker.id;
+      addMarker(freqHz, param);
       renderMarkerTable();
       renderChart();
     }
@@ -527,6 +566,76 @@ freqSpanInput.addEventListener('change', applyCenterSpan);
 markerDeltaToggle.addEventListener('click', () => {
   if (activeMarkerId === null) return;
   deltaRefId = deltaRefId === activeMarkerId ? null : activeMarkerId;
+  renderMarkerTable();
+  renderChart();
+});
+
+searchPeakBtn.addEventListener('click', () => {
+  const m = activeMarkerObj();
+  const f = files.find((f) => f.name === activeFile);
+  if (!m || !f) return;
+  m.freq = findPeak(f.data.points, m.param, currentValueFn()).freq;
+  renderMarkerTable();
+  renderChart();
+});
+
+searchMinBtn.addEventListener('click', () => {
+  const m = activeMarkerObj();
+  const f = files.find((f) => f.name === activeFile);
+  if (!m || !f) return;
+  m.freq = findMin(f.data.points, m.param, currentValueFn()).freq;
+  renderMarkerTable();
+  renderChart();
+});
+
+searchNextLeftBtn.addEventListener('click', () => {
+  const m = activeMarkerObj();
+  const f = files.find((f) => f.name === activeFile);
+  if (!m || !f) return;
+  const pt = findNextPeak(f.data.points, m.param, currentValueFn(), m.freq, 'left');
+  if (pt) {
+    m.freq = pt.freq;
+    renderMarkerTable();
+    renderChart();
+  }
+});
+
+searchNextRightBtn.addEventListener('click', () => {
+  const m = activeMarkerObj();
+  const f = files.find((f) => f.name === activeFile);
+  if (!m || !f) return;
+  const pt = findNextPeak(f.data.points, m.param, currentValueFn(), m.freq, 'right');
+  if (pt) {
+    m.freq = pt.freq;
+    renderMarkerTable();
+    renderChart();
+  }
+});
+
+markerNewCenterBtn.addEventListener('click', () => {
+  const entries = activeEntries();
+  if (entries.length === 0) return;
+  const range = freqRange ?? dataExtent(entries);
+  if (!range) return;
+  addMarker((range[0] + range[1]) / 2, 0);
+  renderMarkerTable();
+  renderChart();
+});
+
+markerClearActiveBtn.addEventListener('click', () => {
+  if (activeMarkerId === null) return;
+  const i = markers.findIndex((m) => m.id === activeMarkerId);
+  if (i >= 0) markers.splice(i, 1);
+  if (deltaRefId === activeMarkerId) deltaRefId = null;
+  activeMarkerId = null;
+  renderMarkerTable();
+  renderChart();
+});
+
+markerClearAllBtn.addEventListener('click', () => {
+  markers.length = 0;
+  activeMarkerId = null;
+  deltaRefId = null;
   renderMarkerTable();
   renderChart();
 });
