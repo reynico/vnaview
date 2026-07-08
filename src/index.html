@@ -42,6 +42,19 @@
           <div id="trace-info-bar"></div>
           <div id="chart-wrap">
             <div id="chart"></div>
+            <div id="marker-overlay" hidden>
+              <table id="marker-table">
+                <thead>
+                  <tr>
+                    <th></th>
+                    <th>Freq</th>
+                    <th>Value</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
           </div>
           <div id="freq-bar" hidden>
             <label>START <input id="freq-start" type="number" step="0.001" /> MHz</label>
@@ -51,9 +64,6 @@
           </div>
         </div>
       </main>
-      <div id="markers" hidden>
-        <div id="marker-list"></div>
-      </div>
     </div>
     <script type="module" src="main.ts"></script>
   </body>

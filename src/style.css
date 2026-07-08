@@ -327,34 +327,61 @@ main.dropping::after {
   border-color: var(--accent);
 }
 
-/* Marker bar */
-#markers {
-  border-top: 1px solid var(--border);
-  padding: 0.4rem 1rem;
-  min-height: 2rem;
-  flex-shrink: 0;
-}
-
-#marker-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-}
-
-.marker-tag {
-  padding: 0.15rem 0.5rem;
-  background: var(--surface);
+/* Marker readout overlay */
+#marker-overlay {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  background: rgba(24, 24, 27, 0.9);
   border: 1px solid var(--border);
-  border-radius: 0.2rem;
-  font-size: 0.72rem;
-  font-family: monospace;
-  color: var(--marker);
-  cursor: pointer;
-  transition: border-color 0.15s, color 0.15s;
+  border-radius: 0.25rem;
+  padding: 0.3rem 0.4rem;
+  pointer-events: auto;
+  z-index: 5;
 }
 
-.marker-tag:hover {
-  border-color: var(--danger);
+#marker-table {
+  border-collapse: collapse;
+  font-family: monospace;
+  font-size: 0.72rem;
+}
+
+#marker-table th {
+  text-align: left;
+  color: var(--muted);
+  font-weight: 500;
+  padding: 0.1rem 0.5rem;
+}
+
+#marker-table td {
+  padding: 0.1rem 0.5rem;
+  color: var(--marker);
+  white-space: nowrap;
+}
+
+.marker-num {
+  color: var(--text) !important;
+  font-weight: 600;
+}
+
+.marker-num::before {
+  content: 'M';
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.marker-remove {
+  padding: 0 0.3rem;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.marker-remove:hover {
   color: var(--danger);
 }
 

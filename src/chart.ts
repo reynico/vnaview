@@ -1,5 +1,5 @@
 import Plotly from 'plotly.js-dist-min';
-import { type TouchstoneData, toDB, toPhase, toVSWR } from './parser';
+import { type TouchstoneData, type DataPoint, type Complex, toDB, toPhase, toVSWR } from './parser';
 
 export type View = 'db' | 'phase' | 'vswr' | 'smith';
 
@@ -24,7 +24,7 @@ const BASE_LAYOUT: Partial<Plotly.Layout> = {
   plot_bgcolor: '#0f0f10',
   font: { color: '#e4e4e7', size: 12, family: 'system-ui, sans-serif' },
   margin: { t: 36, r: 16, b: 52, l: 68 },
-  legend: { bgcolor: 'transparent', bordercolor: '#27272a' },
+  showlegend: false,
   hovermode: 'x unified',
 };
 
@@ -57,11 +57,12 @@ export function render(
 
   for (const { label, color, data } of entries) {
     const freqs = data.points.map((p) => p.freq / 1e6);
+    let paramsToPlot: number[];
 
     if (compare) {
       // S11 solid, S21 dashed (if 2-port)
-      const params = data.ports === 1 ? [0] : [0, 1];
-      for (const i of params) {
+      paramsToPlot = data.ports === 1 ? [0] : [0, 1];
+      for (const i of paramsToPlot) {
         traces.push({
           x: freqs,
           y: data.points.map((p) => fn(p.params[i])),
@@ -73,8 +74,10 @@ export function render(
       }
     } else {
       const count = data.ports === 1 ? 1 : 4;
+      paramsToPlot = [];
       for (let i = 0; i < count; i++) {
         if (view === 'vswr' && i !== 0 && i !== 3) continue;
+        paramsToPlot.push(i);
         traces.push({
           x: freqs,
           y: data.points.map((p) => fn(p.params[i])),
@@ -84,6 +87,12 @@ export function render(
           line: { color: SINGLE_COLORS[i], width: 1.5 },
         });
       }
+    }
+
+    for (const i of paramsToPlot) {
+      const paramMarkers = markers.filter((m) => m.param === i);
+      if (paramMarkers.length === 0) continue;
+      traces.push(markerGlyphTrace(paramMarkers, markers, data.points, fn, i));
     }
   }
 
@@ -120,6 +129,40 @@ export function render(
   ).then(() => Plotly.Plots.resize(el));
 }
 
+function markerGlyphTrace(
+  paramMarkers: Marker[],
+  allMarkers: Marker[],
+  points: DataPoint[],
+  fn: (c: Complex) => number,
+  param: number,
+): Plotly.Data {
+  const x: number[] = [];
+  const y: number[] = [];
+  const text: string[] = [];
+
+  for (const m of paramMarkers) {
+    const pt = points.reduce((a, b) =>
+      Math.abs(b.freq - m.freq) < Math.abs(a.freq - m.freq) ? b : a,
+    );
+    x.push(pt.freq / 1e6);
+    y.push(fn(pt.params[param]));
+    text.push(String(allMarkers.indexOf(m) + 1));
+  }
+
+  return {
+    x,
+    y,
+    type: 'scatter',
+    mode: 'text+markers',
+    marker: { symbol: 'triangle-up', size: 10, color: '#facc15', line: { width: 1, color: '#000' } },
+    text,
+    textposition: 'top center',
+    textfont: { color: '#facc15', size: 10 },
+    hoverinfo: 'skip',
+    showlegend: false,
+  };
+}
+
 function renderSmith(
   el: HTMLElement,
   entries: ChartEntry[],
@@ -128,9 +171,14 @@ function renderSmith(
   const traces: Plotly.Data[] = [...smithGrid()];
 
   for (const { label, color, data } of entries) {
-    const markerPoints = markers.map((m) => {
+    const markerPoints = markers.map((m, idx) => {
       const pt = data.points.find((p) => p.freq >= m.freq) ?? data.points[data.points.length - 1];
-      return { x: pt.params[0].re, y: pt.params[0].im, label: `${(m.freq / 1e6).toFixed(3)} MHz` };
+      return {
+        x: pt.params[0].re,
+        y: pt.params[0].im,
+        num: String(idx + 1),
+        hover: `${idx + 1} · ${(m.freq / 1e6).toFixed(3)} MHz`,
+      };
     });
 
     traces.push({
@@ -147,10 +195,13 @@ function renderSmith(
       traces.push({
         x: markerPoints.map((p) => p.x),
         y: markerPoints.map((p) => p.y),
-        text: markerPoints.map((p) => p.label),
+        text: markerPoints.map((p) => p.num),
+        hovertext: markerPoints.map((p) => p.hover),
         type: 'scatter',
-        mode: 'markers',
-        marker: { color: '#facc15', size: 8 },
+        mode: 'text+markers',
+        marker: { symbol: 'triangle-up', color: '#facc15', size: 10, line: { width: 1, color: '#000' } },
+        textposition: 'top center',
+        textfont: { color: '#facc15', size: 10 },
         showlegend: false,
         hoverinfo: 'text',
       });

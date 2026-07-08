@@ -32,8 +32,8 @@ const fileBar = document.getElementById('file-bar')!;
 const fileChips = document.getElementById('file-chips')!;
 const compareBtn = document.getElementById('compare')!;
 const clearBtn = document.getElementById('clear')!;
-const markersEl = document.getElementById('markers')!;
-const markerList = document.getElementById('marker-list')!;
+const markerOverlay = document.getElementById('marker-overlay')!;
+const markerTableBody = document.querySelector('#marker-table tbody')!;
 const scaleBar = document.getElementById('scale-bar')!;
 const scaleDivInput = document.getElementById('scale-div') as HTMLInputElement;
 const scaleRefInput = document.getElementById('scale-ref') as HTMLInputElement;
@@ -65,7 +65,6 @@ function load(file: File): void {
     scopeArea.hidden = false;
     viewNav.hidden = false;
     clearBtn.hidden = false;
-    markersEl.hidden = false;
 
     renderFileBar();
     updateScaleBarVisibility();
@@ -105,12 +104,11 @@ function reset(): void {
   viewNav.hidden = true;
   fileBar.hidden = true;
   clearBtn.hidden = true;
-  markersEl.hidden = true;
   compareBtn.hidden = true;
   scaleBar.hidden = true;
   freqBar.hidden = true;
   traceInfoBar.innerHTML = '';
-  renderMarkerList();
+  renderMarkerTable();
 }
 
 function updateScaleBarVisibility(): void {
@@ -282,22 +280,39 @@ function markerValue(marker: Marker): string {
   return '';
 }
 
-function renderMarkerList(): void {
-  markerList.innerHTML = '';
-  for (const m of markers) {
-    const tag = document.createElement('span');
-    tag.className = 'marker-tag';
-    const val = markerValue(m);
-    tag.textContent = `${(m.freq / 1e6).toFixed(3)} MHz${val ? ` · ${val}` : ''} ×`;
-    tag.title = 'Click to remove';
-    tag.onclick = () => {
-      const idx = markers.findIndex((x) => x.id === m.id);
-      if (idx >= 0) markers.splice(idx, 1);
-      renderMarkerList();
+function renderMarkerTable(): void {
+  markerOverlay.hidden = markers.length === 0;
+  markerTableBody.innerHTML = '';
+
+  markers.forEach((m, idx) => {
+    const row = document.createElement('tr');
+
+    const numCell = document.createElement('td');
+    numCell.className = 'marker-num';
+    numCell.textContent = String(idx + 1);
+
+    const freqCell = document.createElement('td');
+    freqCell.textContent = `${(m.freq / 1e6).toFixed(3)} MHz`;
+
+    const valCell = document.createElement('td');
+    valCell.textContent = markerValue(m);
+
+    const removeCell = document.createElement('td');
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'marker-remove';
+    removeBtn.textContent = '×';
+    removeBtn.title = 'Remove marker';
+    removeBtn.onclick = () => {
+      const i = markers.findIndex((x) => x.id === m.id);
+      if (i >= 0) markers.splice(i, 1);
+      renderMarkerTable();
       renderChart();
     };
-    markerList.appendChild(tag);
-  }
+    removeCell.appendChild(removeBtn);
+
+    row.append(numCell, freqCell, valCell, removeCell);
+    markerTableBody.appendChild(row);
+  });
 }
 
 let clickListenerAttached = false;
@@ -307,10 +322,25 @@ function attachClickListener(): void {
   clickListenerAttached = true;
 
   (chartEl as any).on('plotly_click', (ev: any) => {
-    const pt = ev.points?.find((p: any) =>
-      ['S11', 'S21', 'S12', 'S22'].some((n) => (p.data.name as string).includes(n)),
+    const candidates = (ev.points ?? []).filter((p: any) =>
+      ['S11', 'S21', 'S12', 'S22'].some((n) => (p.data.name as string)?.includes(n)),
     );
-    if (!pt) return;
+    if (candidates.length === 0) return;
+
+    // hovermode 'x unified' returns one point per visible trace at the clicked x,
+    // not necessarily ordered by proximity to the cursor — pick whichever candidate
+    // is actually closest to the click in data space so markers land on the curve
+    // the user visually clicked, not just the first trace Plotly happens to list.
+    let pt = candidates[0];
+    if (view !== 'smith' && candidates.length > 1 && ev.event) {
+      const layout = (chartEl as any)._fullLayout;
+      const bb = chartEl.getBoundingClientRect();
+      const pixelY = ev.event.clientY - bb.top - layout.margin.t;
+      const clickDataY = layout.yaxis.p2d(pixelY);
+      pt = candidates.reduce((a: any, b: any) =>
+        Math.abs(b.y - clickDataY) < Math.abs(a.y - clickDataY) ? b : a,
+      );
+    }
 
     let freqHz: number;
     let param = 0;
@@ -334,7 +364,7 @@ function attachClickListener(): void {
     if (!markers.some((m) => m.freq === freqHz && m.param === param)) {
       if (markers.length >= MAX_MARKERS) markers.shift();
       markers.push({ id: nextMarkerId++, freq: freqHz, param });
-      renderMarkerList();
+      renderMarkerTable();
       renderChart();
     }
   });
@@ -401,7 +431,7 @@ viewNav.querySelectorAll<HTMLButtonElement>('button').forEach((btn) => {
     viewNav.querySelectorAll('button').forEach((b) => b.classList.remove('active'));
     btn.classList.add('active');
     updateScaleBarVisibility();
-    renderMarkerList();
+    renderMarkerTable();
     renderChart();
   });
 });
@@ -410,7 +440,7 @@ compareBtn.addEventListener('click', () => {
   compareMode = !compareMode;
   compareBtn.classList.toggle('active', compareMode);
   renderFileBar();
-  renderMarkerList();
+  renderMarkerTable();
   renderChart();
 });
 
