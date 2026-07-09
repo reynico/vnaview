@@ -24,7 +24,7 @@ html, body {
   height: 100%;
   background: var(--bg);
   color: var(--text);
-  font: 13px/1.5 var(--mono-font);
+  font: 14px/1.5 var(--mono-font);
 }
 
 #app {
@@ -44,7 +44,7 @@ header {
 }
 
 h1 {
-  font-size: 0.9rem;
+  font-size: 1rem;
   font-weight: 600;
   color: var(--accent);
   letter-spacing: 0.08em;
@@ -64,7 +64,7 @@ button {
   border-radius: 0.2rem;
   color: var(--muted);
   cursor: pointer;
-  font-size: 0.78rem;
+  font-size: 0.85rem;
   transition: border-color 0.15s, color 0.15s;
 }
 
@@ -91,7 +91,7 @@ button.active {
 
 #repo-link {
   color: var(--muted);
-  font-size: 0.75rem;
+  font-size: 0.82rem;
   text-decoration: none;
   margin-left: 0.25rem;
   transition: color 0.15s;
@@ -133,7 +133,7 @@ button.active {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  font-size: 0.72rem;
+  font-size: 0.8rem;
   color: var(--muted);
 }
 
@@ -144,7 +144,7 @@ button.active {
   border: 1px solid var(--border);
   border-radius: 0.2rem;
   color: var(--text);
-  font-size: 0.75rem;
+  font-size: 0.82rem;
 }
 
 #scale-bar input:focus {
@@ -161,7 +161,7 @@ button.active {
   border: 2px solid var(--border);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), inset 0 -1px 0 rgba(0, 0, 0, 0.4);
   border-radius: 0.2rem;
-  font-size: 0.75rem;
+  font-size: 0.82rem;
   cursor: pointer;
   transition: border-color 0.15s;
   user-select: none;
@@ -200,7 +200,7 @@ button.active {
   border: none;
   border-radius: 0;
   color: var(--muted);
-  font-size: 0.85rem;
+  font-size: 0.95rem;
   line-height: 1;
   background: transparent;
   transition: color 0.15s;
@@ -237,7 +237,7 @@ button.active {
 }
 
 .rail-label {
-  font-size: 0.68rem;
+  font-size: 0.76rem;
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -310,7 +310,7 @@ main.dropping::after {
 
 #drop-zone small {
   color: #14330f;
-  font-size: 0.75rem;
+  font-size: 0.82rem;
 }
 
 #scope-area {
@@ -333,7 +333,7 @@ main.dropping::after {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  font-size: 0.72rem;
+  font-size: 0.8rem;
   color: var(--muted);
 }
 
@@ -363,7 +363,7 @@ main.dropping::after {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  font-size: 0.72rem;
+  font-size: 0.8rem;
   color: var(--muted);
 }
 
@@ -374,7 +374,7 @@ main.dropping::after {
   border: 1px solid var(--border);
   border-radius: 0.2rem;
   color: var(--text);
-  font-size: 0.75rem;
+  font-size: 0.82rem;
 }
 
 #freq-bar input:focus {
@@ -406,7 +406,7 @@ main.dropping::after {
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.04);
   border-radius: 0.25rem;
   padding: 0.3rem 0.55rem;
-  font-size: 0.72rem;
+  font-size: 0.82rem;
   color: var(--marker);
   z-index: 5;
 }
@@ -415,7 +415,7 @@ main.dropping::after {
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
-  font-size: 0.68rem;
+  font-size: 0.76rem;
   color: var(--muted);
   margin-top: 0.1rem;
 }
@@ -427,7 +427,7 @@ main.dropping::after {
   border: 1px solid var(--border);
   border-radius: 0.2rem;
   color: var(--text);
-  font-size: 0.75rem;
+  font-size: 0.82rem;
 }
 
 .rail-input-label input:focus {
@@ -443,7 +443,7 @@ main.dropping::after {
 
 #marker-table {
   border-collapse: collapse;
-  font-size: 0.72rem;
+  font-size: 0.82rem;
 }
 
 #marker-table th {
@@ -491,7 +491,7 @@ main.dropping::after {
   border: none;
   background: transparent;
   color: var(--muted);
-  font-size: 0.85rem;
+  font-size: 0.95rem;
   line-height: 1;
   cursor: pointer;
   transition: color 0.15s;
