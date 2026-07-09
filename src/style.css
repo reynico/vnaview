@@ -9,6 +9,7 @@ button, input, select, textarea {
 }
 
 :root {
+  color-scheme: dark;
   --bg: #050a05;
   --surface: #0d160d;
   --border: #1f4620;
@@ -17,7 +18,29 @@ button, input, select, textarea {
   --accent: #ffb000;
   --danger: #ff3b30;
   --marker: #ffe14d;
+  --hint: #14330f;
+  --overlay-bg: rgba(5, 15, 6, 0.92);
+  --hover-tint: rgba(255, 176, 0, 0.03);
+  --dropping-tint: rgba(255, 176, 0, 0.06);
+  --active-row-tint: rgba(255, 176, 0, 0.14);
   --mono-font: ui-monospace, 'SF Mono', 'Cascadia Code', 'JetBrains Mono', Consolas, monospace;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg: #f4f4ef;
+  --surface: #ffffff;
+  --border: #cfd0c4;
+  --text: #1f6b2b;
+  --muted: #5c7a5c;
+  --accent: #b36b00;
+  --danger: #c8291f;
+  --marker: #8a6d00;
+  --hint: #8a8a7d;
+  --overlay-bg: rgba(255, 255, 255, 0.92);
+  --hover-tint: rgba(179, 107, 0, 0.06);
+  --dropping-tint: rgba(179, 107, 0, 0.1);
+  --active-row-tint: rgba(179, 107, 0, 0.14);
 }
 
 html, body {
@@ -82,6 +105,12 @@ button.active {
 
 #compare {
   margin-left: 0.5rem;
+}
+
+#lang-toggle,
+#theme-toggle {
+  margin-left: 0.5rem;
+  min-width: 2.1rem;
 }
 
 #clear:hover {
@@ -275,7 +304,7 @@ main.dropping::after {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 176, 0, 0.06);
+  background: var(--dropping-tint);
   border: 2px dashed var(--accent);
   color: var(--accent);
   font-size: 0.9rem;
@@ -300,7 +329,7 @@ main.dropping::after {
 #drop-zone:hover,
 #drop-zone.over {
   border-color: var(--accent);
-  background: rgba(255, 176, 0, 0.03);
+  background: var(--hover-tint);
 }
 
 #drop-zone p {
@@ -309,7 +338,7 @@ main.dropping::after {
 }
 
 #drop-zone small {
-  color: #14330f;
+  color: var(--hint);
   font-size: 0.82rem;
 }
 
@@ -387,7 +416,7 @@ main.dropping::after {
   position: absolute;
   top: 0.5rem;
   right: 0.5rem;
-  background: rgba(5, 15, 6, 0.92);
+  background: var(--overlay-bg);
   border: 2px solid var(--border);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.04);
   border-radius: 0.25rem;
@@ -401,7 +430,7 @@ main.dropping::after {
   position: absolute;
   bottom: 0.5rem;
   left: 0.5rem;
-  background: rgba(5, 15, 6, 0.92);
+  background: var(--overlay-bg);
   border: 2px solid var(--border);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.04);
   border-radius: 0.25rem;
@@ -464,7 +493,7 @@ main.dropping::after {
 }
 
 #marker-table tbody tr.active {
-  background: rgba(255, 176, 0, 0.14);
+  background: var(--active-row-tint);
 }
 
 #marker-table tbody tr.delta-ref td {

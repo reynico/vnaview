@@ -2,7 +2,11 @@ import { parse, toDB, toPhase, toVSWR } from './parser';
 import { render, PARAM_NAMES, SINGLE_COLORS, type View, type ChartEntry, type Marker } from './chart';
 import { findPeak, findMin, findNextPeak, findBandwidth, type BandwidthResult } from './markers';
 import type { TouchstoneData, Complex } from './parser';
+import { getLang, setLang, t, getTheme, setTheme, type Lang } from './prefs';
 import './style.css';
+
+document.documentElement.lang = getLang();
+document.documentElement.dataset.theme = getTheme();
 
 interface LoadedFile {
   name: string;
@@ -58,6 +62,25 @@ const markerClearAllBtn = document.getElementById('marker-clear-all') as HTMLBut
 const bwSearchBtn = document.getElementById('bw-search') as HTMLButtonElement;
 const bwThresholdInput = document.getElementById('bw-threshold') as HTMLInputElement;
 const bwOverlay = document.getElementById('bw-overlay')!;
+const langToggleBtn = document.getElementById('lang-toggle') as HTMLButtonElement;
+const themeToggleBtn = document.getElementById('theme-toggle') as HTMLButtonElement;
+
+function applyI18n(): void {
+  document.querySelectorAll<HTMLElement>('[data-i18n]').forEach((el) => {
+    el.textContent = t(el.dataset.i18n!);
+  });
+  const otherLang: Lang = getLang() === 'en' ? 'es' : 'en';
+  langToggleBtn.textContent = otherLang.toUpperCase();
+  langToggleBtn.title = t('langToggleLabel');
+  themeToggleBtn.textContent = getTheme() === 'dark' ? t('themeLight') : t('themeDark');
+  themeToggleBtn.title = t('themeToggleLabel');
+}
+
+function refreshDynamicText(): void {
+  renderMarkerTable();
+  if (!bwOverlay.hidden) renderBwOverlay(lastBwResult, lastBwThreshold);
+  renderChart();
+}
 
 function nextColor(): string {
   return FILE_COLORS[files.length % FILE_COLORS.length];
@@ -212,7 +235,7 @@ function applyCenterSpan(): void {
 }
 
 function formatLabel(v: View): string {
-  return v === 'db' ? 'dB Mag' : v === 'phase' ? 'Phase' : v === 'vswr' ? 'VSWR' : 'Smith Chart';
+  return v === 'db' ? 'dB Mag' : v === 'phase' ? t('phase') : v === 'vswr' ? 'VSWR' : 'Smith Chart';
 }
 
 function renderTraceInfoBar(entries: ChartEntry[]): void {
@@ -355,10 +378,15 @@ function updateRailState(): void {
   bwSearchBtn.disabled = !(hasFile && hasActive && view === 'db' && !compareMode);
 }
 
+let lastBwResult: BandwidthResult | null = null;
+let lastBwThreshold = 3;
+
 function renderBwOverlay(result: BandwidthResult | null, thresholdDb: number): void {
+  lastBwResult = result;
+  lastBwThreshold = thresholdDb;
   bwOverlay.hidden = false;
   if (!result) {
-    bwOverlay.textContent = 'BW: N/A (peak too close to data edge)';
+    bwOverlay.textContent = t('bwNotAvailable');
     return;
   }
   const q = Number.isFinite(result.q) ? result.q.toFixed(1) : '—';
@@ -672,3 +700,17 @@ bwSearchBtn.addEventListener('click', () => {
   renderMarkerTable();
   renderChart();
 });
+
+langToggleBtn.addEventListener('click', () => {
+  setLang(getLang() === 'en' ? 'es' : 'en');
+  applyI18n();
+  refreshDynamicText();
+});
+
+themeToggleBtn.addEventListener('click', () => {
+  setTheme(getTheme() === 'dark' ? 'light' : 'dark');
+  applyI18n();
+  renderChart();
+});
+
+applyI18n();

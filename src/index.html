@@ -12,12 +12,14 @@
         <h1>VNA Viewer</h1>
         <nav id="views" hidden>
           <button data-view="db" class="active">dB</button>
-          <button data-view="phase">Phase</button>
+          <button data-view="phase" data-i18n="phase">Phase</button>
           <button data-view="vswr">VSWR</button>
           <button data-view="smith">Smith</button>
         </nav>
-        <button id="compare" hidden>Compare</button>
-        <button id="clear" hidden>Clear all</button>
+        <button id="compare" hidden data-i18n="compare">Compare</button>
+        <button id="clear" hidden data-i18n="clearAllFiles">Clear all</button>
+        <button id="lang-toggle" type="button"></button>
+        <button id="theme-toggle" type="button"></button>
         <a
           id="repo-link"
           href="https://github.com/reynico/vnaview"
@@ -31,13 +33,13 @@
       <div id="scale-bar" hidden>
         <label>dB/DIV <input id="scale-div" type="number" value="10" step="1" min="1" /></label>
         <label>REF <input id="scale-ref" type="number" value="0" step="1" /></label>
-        <button id="scale-auto">Autoscale</button>
+        <button id="scale-auto" data-i18n="autoscale">Autoscale</button>
       </div>
       <div class="body-row">
         <main>
           <div id="drop-zone">
-            <p>Drop a .s1p or .s2p file</p>
-            <small>or click to browse</small>
+            <p data-i18n="dropLine1">Drop a .s1p or .s2p file</p>
+            <small data-i18n="dropLine2">or click to browse</small>
           </div>
           <div id="scope-area" hidden>
             <div id="trace-info-bar"></div>
@@ -48,8 +50,8 @@
                   <thead>
                     <tr>
                       <th></th>
-                      <th>Freq</th>
-                      <th>Value</th>
+                      <th data-i18n="markerTableFreq">Freq</th>
+                      <th data-i18n="markerTableValue">Value</th>
                       <th></th>
                     </tr>
                   </thead>
@@ -59,31 +61,31 @@
               <div id="bw-overlay" hidden></div>
             </div>
             <div id="freq-bar" hidden>
-              <label>START <input id="freq-start" type="number" step="0.001" /> MHz</label>
-              <label>STOP <input id="freq-stop" type="number" step="0.001" /> MHz</label>
-              <label>CENTER <input id="freq-center" type="number" step="0.001" /> MHz</label>
-              <label>SPAN <input id="freq-span" type="number" step="0.001" /> MHz</label>
+              <label><span data-i18n="freqStart">START</span> <input id="freq-start" type="number" step="0.001" /> MHz</label>
+              <label><span data-i18n="freqStop">STOP</span> <input id="freq-stop" type="number" step="0.001" /> MHz</label>
+              <label><span data-i18n="freqCenter">CENTER</span> <input id="freq-center" type="number" step="0.001" /> MHz</label>
+              <label><span data-i18n="freqSpan">SPAN</span> <input id="freq-span" type="number" step="0.001" /> MHz</label>
             </div>
           </div>
         </main>
         <aside id="softkey-rail" hidden>
           <div class="rail-group">
-            <div class="rail-label">Search</div>
-            <button id="search-peak">Marker→Peak</button>
-            <button id="search-min">Marker→Min</button>
-            <button id="search-next-left">Peak Search ←</button>
-            <button id="search-next-right">Peak Search →</button>
-            <button id="bw-search">BW Search</button>
-            <label class="rail-input-label">Threshold
+            <div class="rail-label" data-i18n="railSearch">Search</div>
+            <button id="search-peak" data-i18n="markerToPeak">Marker→Peak</button>
+            <button id="search-min" data-i18n="markerToMin">Marker→Min</button>
+            <button id="search-next-left" data-i18n="peakSearchLeft">Peak Search ←</button>
+            <button id="search-next-right" data-i18n="peakSearchRight">Peak Search →</button>
+            <button id="bw-search" data-i18n="bwSearch">BW Search</button>
+            <label class="rail-input-label"><span data-i18n="threshold">Threshold</span>
               <input id="bw-threshold" type="number" value="3" step="0.5" min="0.1" /> dB
             </label>
           </div>
           <div class="rail-group">
-            <div class="rail-label">Markers</div>
-            <button id="marker-delta-toggle">Δ Ref</button>
-            <button id="marker-new-center">New at Center</button>
-            <button id="marker-clear-active">Clear Active</button>
-            <button id="marker-clear-all">Clear All</button>
+            <div class="rail-label" data-i18n="railMarkers">Markers</div>
+            <button id="marker-delta-toggle" data-i18n="deltaRef">Δ Ref</button>
+            <button id="marker-new-center" data-i18n="newAtCenter">New at Center</button>
+            <button id="marker-clear-active" data-i18n="clearActive">Clear Active</button>
+            <button id="marker-clear-all" data-i18n="clearAllMarkers">Clear All</button>
           </div>
         </aside>
       </div>

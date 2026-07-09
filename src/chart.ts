@@ -1,5 +1,6 @@
 import Plotly from 'plotly.js-dist-min';
 import { type TouchstoneData, type DataPoint, type Complex, toDB, toPhase, toVSWR } from './parser';
+import { t } from './prefs';
 
 export type View = 'db' | 'phase' | 'vswr' | 'smith';
 
@@ -145,7 +146,7 @@ export function render(
   }
 
   const yTitle =
-    view === 'db' ? 'Magnitude (dB)' : view === 'phase' ? 'Phase (°)' : 'VSWR';
+    view === 'db' ? `${t('magnitude')} (dB)` : view === 'phase' ? `${t('phase')} (°)` : 'VSWR';
 
   const shapes: Partial<Plotly.Shape>[] = markers.map((m) => ({
     type: 'line',
@@ -169,7 +170,7 @@ export function render(
     {
       ...baseLayout(),
       title: plotTitle(entries, view),
-      xaxis: { ...axisStyle(), title: { text: 'Frequency (MHz)' }, range: xRange },
+      xaxis: { ...axisStyle(), title: { text: `${t('frequency')} (MHz)` }, range: xRange },
       yaxis: { ...axisStyle(), title: { text: yTitle }, range: yRange },
       shapes,
     },
@@ -309,7 +310,7 @@ function plotTitle(entries: ChartEntry[], view: View) {
     params = 'S11 · Smith Chart';
   } else {
     const viewLabel =
-      view === 'db' ? 'Magnitude (dB)' : view === 'phase' ? 'Phase' : 'VSWR';
+      view === 'db' ? `${t('magnitude')} (dB)` : view === 'phase' ? t('phase') : 'VSWR';
     if (entries.length > 1) {
       params = `S11${entries.some((e) => e.data.ports === 2) ? ', S21' : ''} · ${viewLabel}`;
     } else {

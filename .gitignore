@@ -1,0 +1,7 @@
+node_modules/
+dist/
+package-lock.json
+*.s1p
+*.s2p
+*.S1P
+*.S2P
