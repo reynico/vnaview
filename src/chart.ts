@@ -19,7 +19,6 @@ export interface Marker {
   param: number;
 }
 
-export const SINGLE_COLORS = ['#33ff33', '#ffb000', '#7dffb2', '#ff5533'];
 export const PARAM_NAMES = ['S11', 'S21', 'S12', 'S22'];
 
 const MONO_FONT = "ui-monospace, 'SF Mono', 'Cascadia Code', 'JetBrains Mono', Consolas, monospace";
@@ -36,7 +35,24 @@ function theme() {
     muted: read('--muted', '#1f8f1f'),
     text: read('--text', '#33ff33'),
     danger: read('--danger', '#ff3b30'),
+    marker: read('--marker', '#ffe14d'),
+    markerActive: read('--marker-active', '#f8fafc'),
+    markerDelta: read('--marker-delta', '#ff5ec2'),
+    memory: read('--memory', '#7a8a99'),
+    singleColors: [
+      read('--trace-s11', '#33ff33'),
+      read('--trace-s21', '#ffb000'),
+      read('--trace-s12', '#7dffb2'),
+      read('--trace-s22', '#ff5533'),
+    ],
   };
+}
+
+// Per-parameter trace colors for the single-file (non-compare) views. Read
+// from CSS custom properties so they flip with the dark/light theme, same as
+// the rest of theme().
+export function singleColors(): string[] {
+  return theme().singleColors;
 }
 
 function baseLayout(): Partial<Plotly.Layout> {
@@ -137,6 +153,7 @@ export function render(
 
   const compare = entries.length > 1;
   const traces: Plotly.Data[] = [];
+  const colors = singleColors();
 
   for (const entry of entries) {
     const { label, color, data, isMemory } = entry;
@@ -168,14 +185,14 @@ export function render(
         paramsToPlot.push(i);
         if (isHidden(label, i)) continue;
         const y = computeYValues(data, i, view);
-        traces.push(glowTrace(freqs, y, SINGLE_COLORS[i], 1.5));
+        traces.push(glowTrace(freqs, y, colors[i], 1.5));
         traces.push({
           x: freqs,
           y,
           name: PARAM_NAMES[i],
           type: 'scatter',
           mode: 'lines',
-          line: { color: SINGLE_COLORS[i], width: 1.5 },
+          line: { color: colors[i], width: 1.5 },
         });
       }
     }
@@ -207,7 +224,7 @@ export function render(
     y0: 0,
     y1: 1,
     yref: 'paper' as const,
-    line: { color: MARKER_COLOR, width: 1, dash: 'dot' },
+    line: { color: theme().marker, width: 1, dash: 'dot' },
     editable: true,
   }));
 
@@ -250,14 +267,11 @@ export function render(
   ).then(() => Plotly.Plots.resize(el));
 }
 
-const MARKER_COLOR = '#ffe14d';
-const MARKER_ACTIVE_COLOR = '#f8fafc';
-const MARKER_DELTA_REF_COLOR = '#ff5ec2';
-
 function glyphColor(markerId: number, activeMarkerId: number | null, deltaRefId: number | null): string {
-  if (markerId === deltaRefId) return MARKER_DELTA_REF_COLOR;
-  if (markerId === activeMarkerId) return MARKER_ACTIVE_COLOR;
-  return MARKER_COLOR;
+  const th = theme();
+  if (markerId === deltaRefId) return th.markerDelta;
+  if (markerId === activeMarkerId) return th.markerActive;
+  return th.marker;
 }
 
 function markerGlyphTrace(
@@ -413,6 +427,7 @@ function renderPolar(
   maxR = Math.ceil(maxR * 5) / 5;
 
   const traces: Plotly.Data[] = [...polarGrid(maxR)];
+  const colors = singleColors();
 
   for (const entry of entries) {
     const { label, color, data, isMemory } = entry;
@@ -422,7 +437,7 @@ function renderPolar(
 
     for (const i of paramIdxs) {
       if (isHidden(label, i)) continue;
-      const traceColor = compare ? color : SINGLE_COLORS[i];
+      const traceColor = compare ? color : colors[i];
       const x = data.points.map((p) => p.params[i].re);
       const y = data.points.map((p) => p.params[i].im);
       if (!isMemory) traces.push(glowTrace(x, y, traceColor, 1.5));

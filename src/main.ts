@@ -1,5 +1,5 @@
 import { parse, toDB, toPhase, toVSWR, groupDelay } from './parser';
-import { render, PARAM_NAMES, SINGLE_COLORS, type View, type ChartEntry, type Marker } from './chart';
+import { render, PARAM_NAMES, singleColors, type View, type ChartEntry, type Marker } from './chart';
 import { findPeak, findMin, findNextPeak, findBandwidth, type BandwidthResult } from './markers';
 import { evaluateLimits, type LimitLine } from './limits';
 import type { TouchstoneData, Complex } from './parser';
@@ -25,9 +25,7 @@ interface LoadedFile {
   text: string;
 }
 
-const FILE_COLORS = ['#33ff33', '#ffb000', '#7dffb2', '#ff5533', '#c8ff33', '#ffdd55', '#33ffcc', '#ff8855'];
 const MAX_MARKERS = 6;
-const MEMORY_COLOR = '#7a8a99';
 
 // Views with a Re/Im(Γ) plane instead of a linear frequency axis: no freq
 // bar, no dB/DIV scale bar, marker placement snaps to nearest point in x/y
@@ -142,12 +140,24 @@ function refreshDynamicText(): void {
   renderChart();
 }
 
-function nextColor(): string {
-  return FILE_COLORS[files.length % FILE_COLORS.length];
-}
-
 function cssVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+// Read from CSS custom properties so per-file colors flip with the
+// dark/light theme instead of staying fixed to whichever theme was active
+// when a file was loaded.
+function fileColors(): string[] {
+  return Array.from({ length: 8 }, (_, i) => cssVar(`--file-${i}`));
+}
+
+function nextColor(): string {
+  const colors = fileColors();
+  return colors[files.length % colors.length];
+}
+
+function memoryColor(): string {
+  return cssVar('--memory');
 }
 
 function currentLimits(): LimitLine[] {
@@ -325,7 +335,7 @@ function activeEntries(): ChartEntry[] {
   if (!f) return [];
   const entries: ChartEntry[] = [{ label: f.name, color: f.color, data: f.data }];
   if (memoryVisible && memoryTrace) {
-    entries.push({ label: `${memoryTrace.name} (mem)`, color: MEMORY_COLOR, data: memoryTrace.data, isMemory: true });
+    entries.push({ label: `${memoryTrace.name} (mem)`, color: memoryColor(), data: memoryTrace.data, isMemory: true });
   }
   return entries;
 }
@@ -448,7 +458,7 @@ function renderTraceInfoBar(entries: ChartEntry[]): void {
 
     for (const i of paramIdxs) {
       const name = compare ? `${entry.label} · ${PARAM_NAMES[i]}` : PARAM_NAMES[i];
-      const color = compare ? entry.color : SINGLE_COLORS[i];
+      const color = compare ? entry.color : singleColors()[i];
       addChip(color, `${name} · ${label}${scaleSuffix}`, traceKey(entry.label, i));
     }
   }
@@ -1135,6 +1145,12 @@ langToggleBtn.addEventListener('click', () => {
 themeToggleBtn.addEventListener('click', () => {
   setTheme(getTheme() === 'dark' ? 'light' : 'dark');
   applyI18n();
+  // Files already carry a resolved color from whichever theme was active at
+  // load time; re-resolve them from the new theme's palette so traces and
+  // chips flip too, not just the chart chrome.
+  const colors = fileColors();
+  files.forEach((f, i) => (f.color = colors[i % colors.length]));
+  renderFileBar();
   renderChart();
 });
 
