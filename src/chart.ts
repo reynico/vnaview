@@ -1,13 +1,15 @@
 import Plotly from 'plotly.js-dist-min';
-import { type TouchstoneData, type DataPoint, type Complex, toDB, toPhase, toVSWR } from './parser';
+import { type TouchstoneData, type DataPoint, toDB, toPhase, toVSWR, mag, groupDelay } from './parser';
 import { t } from './prefs';
 
-export type View = 'db' | 'phase' | 'vswr' | 'smith';
+export type View = 'db' | 'phase' | 'vswr' | 'groupdelay' | 'smith' | 'polar';
 
 export interface ChartEntry {
   label: string;
   color: string;
   data: TouchstoneData;
+  /** Dimmed/dashed ghost trace (trace memory), rendered but excluded from marker glyphs. */
+  isMemory?: boolean;
 }
 
 export interface Marker {
@@ -33,6 +35,7 @@ function theme() {
     border: read('--border', '#1f4620'),
     muted: read('--muted', '#1f8f1f'),
     text: read('--text', '#33ff33'),
+    danger: read('--danger', '#ff3b30'),
   };
 }
 
@@ -76,6 +79,39 @@ function axisStyle(): Partial<Plotly.LayoutAxis> {
   };
 }
 
+function computeYRange(view: View, perDiv: number, ref: number): [number, number] | undefined {
+  switch (view) {
+    case 'db':
+      return [ref - perDiv * 8, ref + perDiv * 2];
+    case 'phase':
+      return [ref - perDiv * 5, ref + perDiv * 5];
+    case 'vswr':
+      return [ref - perDiv * 10, ref];
+    case 'groupdelay':
+      return [ref - perDiv * 5, ref + perDiv * 5];
+    default:
+      return undefined;
+  }
+}
+
+// Group Delay is a derivative across points (not a per-point transform like
+// toDB/toPhase/toVSWR), so it needs its own array-level path rather than a
+// single Complex->number fn.
+function computeYValues(data: TouchstoneData, param: number, view: View): number[] {
+  if (view === 'groupdelay') {
+    return groupDelay(data.points, param).map((v) => v * 1e9);
+  }
+  const fn = view === 'db' ? toDB : view === 'phase' ? toPhase : toVSWR;
+  const raw = data.points.map((p) => fn(p.params[param]));
+  return view === 'vswr' ? raw.map((v) => Math.round(v * 100) / 100) : raw;
+}
+
+function exportFilename(entries: ChartEntry[], view: View): string {
+  const base = entries.length > 1 ? 'compare' : entries[0]?.label.replace(/\.[^.]+$/, '') ?? 'trace';
+  const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  return `${base}_${view}_${date}`;
+}
+
 export function render(
   el: HTMLElement,
   entries: ChartEntry[],
@@ -86,35 +122,38 @@ export function render(
   freqRange: [number, number] | null = null,
   activeMarkerId: number | null = null,
   deltaRefId: number | null = null,
+  limitUpper: number | null = null,
+  limitLower: number | null = null,
 ): Promise<void> {
   if (view === 'smith') {
     return renderSmith(el, entries, markers, activeMarkerId, deltaRefId);
   }
+  if (view === 'polar') {
+    return renderPolar(el, entries, markers, activeMarkerId, deltaRefId);
+  }
 
   const compare = entries.length > 1;
   const traces: Plotly.Data[] = [];
-  const rawFn = view === 'db' ? toDB : view === 'phase' ? toPhase : toVSWR;
-  const fn = view === 'vswr'
-    ? (c: Parameters<typeof toVSWR>[0]) => Math.round(rawFn(c) * 100) / 100
-    : rawFn;
 
-  for (const { label, color, data } of entries) {
+  for (const entry of entries) {
+    const { label, color, data, isMemory } = entry;
     const freqs = data.points.map((p) => p.freq / 1e6);
     let paramsToPlot: number[];
 
     if (compare) {
-      // S11 solid, S21 dashed (if 2-port)
+      // S11 solid, S21 dashed (if 2-port); memory traces are always dotted/dimmed.
       paramsToPlot = data.ports === 1 ? [0] : [0, 1];
       for (const i of paramsToPlot) {
-        const y = data.points.map((p) => fn(p.params[i]));
-        traces.push(glowTrace(freqs, y, color, 1.5));
+        const y = computeYValues(data, i, view);
+        if (!isMemory) traces.push(glowTrace(freqs, y, color, 1.5));
         traces.push({
           x: freqs,
           y,
           name: `${label} · ${PARAM_NAMES[i]}`,
           type: 'scatter',
           mode: 'lines',
-          line: { color, width: 1.5, dash: i === 0 ? 'solid' : 'dash' },
+          line: { color, width: 1.5, dash: isMemory ? 'dot' : i === 0 ? 'solid' : 'dash' },
+          opacity: isMemory ? 0.5 : 1,
         });
       }
     } else {
@@ -123,7 +162,7 @@ export function render(
       for (let i = 0; i < count; i++) {
         if (view === 'vswr' && i !== 0 && i !== 3) continue;
         paramsToPlot.push(i);
-        const y = data.points.map((p) => fn(p.params[i]));
+        const y = computeYValues(data, i, view);
         traces.push(glowTrace(freqs, y, SINGLE_COLORS[i], 1.5));
         traces.push({
           x: freqs,
@@ -136,17 +175,22 @@ export function render(
       }
     }
 
+    if (isMemory) continue;
     for (const i of paramsToPlot) {
       const paramMarkers = markers.filter((m) => m.param === i);
       if (paramMarkers.length === 0) continue;
+      const yValues = computeYValues(data, i, view);
       traces.push(
-        markerGlyphTrace(paramMarkers, markers, data.points, fn, i, activeMarkerId, deltaRefId),
+        markerGlyphTrace(paramMarkers, markers, data.points, yValues, activeMarkerId, deltaRefId),
       );
     }
   }
 
   const yTitle =
-    view === 'db' ? `${t('magnitude')} (dB)` : view === 'phase' ? `${t('phase')} (°)` : 'VSWR';
+    view === 'db' ? `${t('magnitude')} (dB)`
+    : view === 'phase' ? `${t('phase')} (°)`
+    : view === 'groupdelay' ? `${t('groupDelay')} (ns)`
+    : 'VSWR';
 
   const shapes: Partial<Plotly.Shape>[] = markers.map((m) => ({
     type: 'line',
@@ -158,8 +202,22 @@ export function render(
     line: { color: MARKER_COLOR, width: 1, dash: 'dot' },
   }));
 
-  const yRange: [number, number] | undefined =
-    view === 'db' ? [refLevel - dbPerDiv * 8, refLevel + dbPerDiv * 2] : undefined;
+  if (view === 'db') {
+    for (const limitValue of [limitUpper, limitLower]) {
+      if (limitValue === null) continue;
+      shapes.push({
+        type: 'line',
+        x0: 0,
+        x1: 1,
+        xref: 'paper' as const,
+        y0: limitValue,
+        y1: limitValue,
+        line: { color: theme().danger, width: 1.5, dash: 'dash' },
+      });
+    }
+  }
+
+  const yRange = computeYRange(view, dbPerDiv, refLevel);
   const xRange: [number, number] | undefined = freqRange
     ? [freqRange[0] / 1e6, freqRange[1] / 1e6]
     : undefined;
@@ -174,7 +232,10 @@ export function render(
       yaxis: { ...axisStyle(), title: { text: yTitle }, range: yRange },
       shapes,
     },
-    { responsive: true },
+    {
+      responsive: true,
+      toImageButtonOptions: { format: 'png', filename: exportFilename(entries, view), scale: 2 },
+    },
   ).then(() => Plotly.Plots.resize(el));
 }
 
@@ -192,8 +253,7 @@ function markerGlyphTrace(
   paramMarkers: Marker[],
   allMarkers: Marker[],
   points: DataPoint[],
-  fn: (c: Complex) => number,
-  param: number,
+  yValues: number[],
   activeMarkerId: number | null,
   deltaRefId: number | null,
 ): Plotly.Data {
@@ -203,11 +263,17 @@ function markerGlyphTrace(
   const colors: string[] = [];
 
   for (const m of paramMarkers) {
-    const pt = points.reduce((a, b) =>
-      Math.abs(b.freq - m.freq) < Math.abs(a.freq - m.freq) ? b : a,
-    );
-    x.push(pt.freq / 1e6);
-    y.push(fn(pt.params[param]));
+    let idx = 0;
+    let minDist = Infinity;
+    for (let k = 0; k < points.length; k++) {
+      const d = Math.abs(points[k].freq - m.freq);
+      if (d < minDist) {
+        minDist = d;
+        idx = k;
+      }
+    }
+    x.push(points[idx].freq / 1e6);
+    y.push(yValues[idx]);
     text.push(String(allMarkers.indexOf(m) + 1));
     colors.push(glyphColor(m.id, activeMarkerId, deltaRefId));
   }
@@ -235,21 +301,24 @@ function renderSmith(
 ): Promise<void> {
   const traces: Plotly.Data[] = [...smithGrid()];
 
-  for (const { label, color, data } of entries) {
-    const markerPoints = markers.map((m, idx) => {
-      const pt = data.points.find((p) => p.freq >= m.freq) ?? data.points[data.points.length - 1];
-      return {
-        x: pt.params[0].re,
-        y: pt.params[0].im,
-        num: String(idx + 1),
-        hover: `${idx + 1} · ${(m.freq / 1e6).toFixed(3)} MHz`,
-        color: glyphColor(m.id, activeMarkerId, deltaRefId),
-      };
-    });
+  for (const entry of entries) {
+    const { label, color, data, isMemory } = entry;
+    const markerPoints = isMemory
+      ? []
+      : markers.map((m, idx) => {
+          const pt = data.points.find((p) => p.freq >= m.freq) ?? data.points[data.points.length - 1];
+          return {
+            x: pt.params[0].re,
+            y: pt.params[0].im,
+            num: String(idx + 1),
+            hover: `${idx + 1} · ${(m.freq / 1e6).toFixed(3)} MHz`,
+            color: glyphColor(m.id, activeMarkerId, deltaRefId),
+          };
+        });
 
     const smithX = data.points.map((p) => p.params[0].re);
     const smithY = data.points.map((p) => p.params[0].im);
-    traces.push(glowTrace(smithX, smithY, color, 2));
+    if (!isMemory) traces.push(glowTrace(smithX, smithY, color, 2));
     traces.push({
       x: smithX,
       y: smithY,
@@ -257,7 +326,8 @@ function renderSmith(
       type: 'scatter',
       mode: 'lines',
       name: entries.length > 1 ? label : 'S11',
-      line: { color, width: 2 },
+      line: { color, width: 2, dash: isMemory ? 'dot' : 'solid' },
+      opacity: isMemory ? 0.5 : 1,
     });
 
     if (markerPoints.length > 0) {
@@ -298,8 +368,134 @@ function renderSmith(
       },
       yaxis: { ...axisStyle(), title: { text: 'Im(Γ)' }, range: [-1.1, 1.1] },
     },
-    { responsive: true },
+    {
+      responsive: true,
+      toImageButtonOptions: { format: 'png', filename: exportFilename(entries, 'smith'), scale: 2 },
+    },
   ).then(() => Plotly.Plots.resize(el));
+}
+
+function renderPolar(
+  el: HTMLElement,
+  entries: ChartEntry[],
+  markers: Marker[],
+  activeMarkerId: number | null = null,
+  deltaRefId: number | null = null,
+): Promise<void> {
+  const compare = entries.length > 1;
+
+  let maxR = 1;
+  for (const { data } of entries) {
+    const count = compare ? (data.ports === 1 ? 1 : 2) : data.ports === 1 ? 1 : 4;
+    for (let i = 0; i < count; i++) {
+      for (const p of data.points) {
+        const m = mag(p.params[i]);
+        if (m > maxR) maxR = m;
+      }
+    }
+  }
+  maxR = Math.ceil(maxR * 5) / 5;
+
+  const traces: Plotly.Data[] = [...polarGrid(maxR)];
+
+  for (const entry of entries) {
+    const { label, color, data, isMemory } = entry;
+    const paramIdxs = compare
+      ? data.ports === 1 ? [0] : [0, 1]
+      : Array.from({ length: data.ports === 1 ? 1 : 4 }, (_, i) => i);
+
+    for (const i of paramIdxs) {
+      const traceColor = compare ? color : SINGLE_COLORS[i];
+      const x = data.points.map((p) => p.params[i].re);
+      const y = data.points.map((p) => p.params[i].im);
+      if (!isMemory) traces.push(glowTrace(x, y, traceColor, 1.5));
+      traces.push({
+        x,
+        y,
+        text: data.points.map((p) => `${(p.freq / 1e6).toFixed(3)} MHz`),
+        type: 'scatter',
+        mode: 'lines',
+        name: compare ? `${label} · ${PARAM_NAMES[i]}` : PARAM_NAMES[i],
+        line: { color: traceColor, width: 1.5, dash: isMemory ? 'dot' : compare && i === 1 ? 'dash' : 'solid' },
+        opacity: isMemory ? 0.5 : 1,
+      });
+
+      if (isMemory) continue;
+      const paramMarkers = markers.filter((m) => m.param === i);
+      if (paramMarkers.length === 0) continue;
+      const markerPoints = paramMarkers.map((m) => {
+        const pt = data.points.reduce((a, b) =>
+          Math.abs(b.freq - m.freq) < Math.abs(a.freq - m.freq) ? b : a,
+        );
+        return {
+          x: pt.params[i].re,
+          y: pt.params[i].im,
+          num: String(markers.indexOf(m) + 1),
+          hover: `${markers.indexOf(m) + 1} · ${(m.freq / 1e6).toFixed(3)} MHz`,
+          color: glyphColor(m.id, activeMarkerId, deltaRefId),
+        };
+      });
+      traces.push({
+        x: markerPoints.map((p) => p.x),
+        y: markerPoints.map((p) => p.y),
+        text: markerPoints.map((p) => p.num),
+        hovertext: markerPoints.map((p) => p.hover),
+        type: 'scatter',
+        mode: 'text+markers',
+        marker: {
+          symbol: 'triangle-up',
+          color: markerPoints.map((p) => p.color),
+          size: 10,
+          line: { width: 1, color: '#000' },
+        },
+        textposition: 'top center',
+        textfont: { color: markerPoints.map((p) => p.color), size: 10 },
+        showlegend: false,
+        hoverinfo: 'text',
+      });
+    }
+  }
+
+  return Plotly.react(
+    el,
+    traces,
+    {
+      ...baseLayout(),
+      title: plotTitle(entries, 'polar'),
+      hovermode: 'closest',
+      xaxis: {
+        ...axisStyle(),
+        title: { text: 'Re(Γ)' },
+        range: [-maxR * 1.05, maxR * 1.05],
+        scaleanchor: 'y',
+        scaleratio: 1,
+      },
+      yaxis: { ...axisStyle(), title: { text: 'Im(Γ)' }, range: [-maxR * 1.05, maxR * 1.05] },
+    },
+    {
+      responsive: true,
+      toImageButtonOptions: { format: 'png', filename: exportFilename(entries, 'polar'), scale: 2 },
+    },
+  ).then(() => Plotly.Plots.resize(el));
+}
+
+function polarGrid(maxR: number): Plotly.Data[] {
+  const N = 360;
+  const theta = Array.from({ length: N + 1 }, (_, i) => (i * Math.PI * 2) / N);
+  const traces: Plotly.Data[] = [];
+
+  const rings = 4;
+  for (let k = 1; k <= rings; k++) {
+    const r = (maxR * k) / rings;
+    traces.push(gridLine(theta.map((th) => r * Math.cos(th)), theta.map((th) => r * Math.sin(th))));
+  }
+
+  for (let deg = 0; deg < 360; deg += 30) {
+    const rad = (deg * Math.PI) / 180;
+    traces.push(gridLine([0, maxR * Math.cos(rad)], [0, maxR * Math.sin(rad)]));
+  }
+
+  return traces;
 }
 
 function plotTitle(entries: ChartEntry[], view: View) {
@@ -308,9 +504,19 @@ function plotTitle(entries: ChartEntry[], view: View) {
   let params: string;
   if (view === 'smith') {
     params = 'S11 · Smith Chart';
+  } else if (view === 'polar') {
+    if (entries.length > 1) {
+      params = `S11${entries.some((e) => e.data.ports === 2) ? ', S21' : ''} · Polar`;
+    } else {
+      const { ports } = entries[0].data;
+      params = `${ports === 1 ? 'S11' : 'S11–S22'} · Polar`;
+    }
   } else {
     const viewLabel =
-      view === 'db' ? `${t('magnitude')} (dB)` : view === 'phase' ? t('phase') : 'VSWR';
+      view === 'db' ? `${t('magnitude')} (dB)`
+      : view === 'phase' ? t('phase')
+      : view === 'groupdelay' ? `${t('groupDelay')} (ns)`
+      : 'VSWR';
     if (entries.length > 1) {
       params = `S11${entries.some((e) => e.data.ports === 2) ? ', S21' : ''} · ${viewLabel}`;
     } else {

@@ -86,3 +86,33 @@ export function toVSWR(c: Complex): number {
   const m = mag(c);
   return m < 1 ? (1 + m) / (1 - m) : Infinity;
 }
+
+function unwrapPhase(rad: number[]): number[] {
+  const out = [rad[0]];
+  for (let i = 1; i < rad.length; i++) {
+    let d = rad[i] - rad[i - 1];
+    while (d > Math.PI) d -= 2 * Math.PI;
+    while (d < -Math.PI) d += 2 * Math.PI;
+    out.push(out[i - 1] + d);
+  }
+  return out;
+}
+
+/**
+ * -dPhase/dOmega in seconds, one value per point, via a centered finite
+ * difference (forward/backward at the edges). Phase is unwrapped first so
+ * the +/-180deg wraparound doesn't show up as a spurious delay spike.
+ */
+export function groupDelay(points: DataPoint[], param: number): number[] {
+  if (points.length < 2) return points.map(() => NaN);
+  const unwrapped = unwrapPhase(points.map((p) => Math.atan2(p.params[param].im, p.params[param].re)));
+  const gd: number[] = new Array(points.length);
+  for (let i = 0; i < points.length; i++) {
+    const lo = i === 0 ? 0 : i - 1;
+    const hi = i === points.length - 1 ? points.length - 1 : i + 1;
+    const dPhase = unwrapped[hi] - unwrapped[lo];
+    const dFreq = points[hi].freq - points[lo].freq;
+    gd[i] = dFreq !== 0 ? -dPhase / (2 * Math.PI * dFreq) : NaN;
+  }
+  return gd;
+}

@@ -14,9 +14,12 @@
           <button data-view="db" class="active">dB</button>
           <button data-view="phase" data-i18n="phase">Phase</button>
           <button data-view="vswr">VSWR</button>
+          <button data-view="groupdelay" data-i18n="groupDelay">Group Delay</button>
           <button data-view="smith">Smith</button>
+          <button data-view="polar" data-i18n="polar">Polar</button>
         </nav>
         <button id="compare" hidden data-i18n="compare">Compare</button>
+        <button id="export-csv" hidden data-i18n="exportCsv">Export CSV</button>
         <button id="clear" hidden data-i18n="clearAllFiles">Clear all</button>
         <button id="lang-toggle" type="button"></button>
         <button id="theme-toggle" type="button"></button>
@@ -31,8 +34,8 @@
         <div id="file-chips"></div>
       </div>
       <div id="scale-bar" hidden>
-        <label>dB/DIV <input id="scale-div" type="number" value="10" step="1" min="1" /></label>
-        <label>REF <input id="scale-ref" type="number" value="0" step="1" /></label>
+        <label><span id="scale-div-unit">dB</span>/DIV <input id="scale-div" type="number" value="10" step="1" min="0.001" /></label>
+        <label>REF <input id="scale-ref" type="number" value="0" step="1" /> <span id="scale-ref-unit">dB</span></label>
         <button id="scale-auto" data-i18n="autoscale">Autoscale</button>
       </div>
       <div class="body-row">
@@ -86,6 +89,23 @@
             <button id="marker-new-center" data-i18n="newAtCenter">New at Center</button>
             <button id="marker-clear-active" data-i18n="clearActive">Clear Active</button>
             <button id="marker-clear-all" data-i18n="clearAllMarkers">Clear All</button>
+          </div>
+          <div class="rail-group">
+            <div class="rail-label" data-i18n="railLimits">Limits</div>
+            <label class="rail-input-label"><span data-i18n="limitUpper">Upper Limit</span>
+              <input id="limit-upper" type="number" value="-10" step="0.5" /> dB
+            </label>
+            <button id="limit-upper-toggle" data-i18n="limitEnable">Enable</button>
+            <label class="rail-input-label"><span data-i18n="limitLower">Lower Limit</span>
+              <input id="limit-lower" type="number" value="-30" step="0.5" /> dB
+            </label>
+            <button id="limit-lower-toggle" data-i18n="limitEnable">Enable</button>
+          </div>
+          <div class="rail-group">
+            <div class="rail-label" data-i18n="railMemory">Memory</div>
+            <button id="memory-save" data-i18n="memorySave">Save Memory</button>
+            <button id="memory-toggle" data-i18n="memoryShow">Show Memory</button>
+            <button id="memory-clear" data-i18n="memoryClear">Clear Memory</button>
           </div>
         </aside>
       </div>

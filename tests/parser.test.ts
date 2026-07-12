@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { parse, toDB, toPhase, toVSWR, mag } from '../src/parser';
+import { parse, toDB, toPhase, toVSWR, mag, groupDelay } from '../src/parser';
+import type { DataPoint } from '../src/parser';
 
 const S1P_RI = `
 !Test S1P file
@@ -128,5 +129,36 @@ describe('toVSWR', () => {
 
   it('returns Infinity for |Γ| > 1', () => {
     expect(toVSWR({ re: 2, im: 0 })).toBe(Infinity);
+  });
+});
+
+function linearPhasePoints(freqs: number[], tauSec: number): DataPoint[] {
+  return freqs.map((freq) => {
+    const phase = -2 * Math.PI * freq * tauSec;
+    return { freq, params: [{ re: Math.cos(phase), im: Math.sin(phase) }] };
+  });
+}
+
+describe('groupDelay', () => {
+  it('returns a constant delay for a linear phase ramp', () => {
+    const tauNs = 1;
+    const freqs = [0, 1e6, 2e6, 3e6, 4e6, 5e6];
+    const points = linearPhasePoints(freqs, tauNs * 1e-9);
+    const gd = groupDelay(points, 0);
+    for (const v of gd) expect(v * 1e9).toBeCloseTo(tauNs, 6);
+  });
+
+  it('unwraps phase across the +/-180deg boundary without a spurious spike', () => {
+    const tauNs = 200;
+    const freqs = Array.from({ length: 20 }, (_, i) => i * 0.1e6);
+    const points = linearPhasePoints(freqs, tauNs * 1e-9);
+    const gd = groupDelay(points, 0);
+    for (const v of gd) expect(v * 1e9).toBeCloseTo(tauNs, 3);
+  });
+
+  it('returns NaN when fewer than 2 points are given', () => {
+    const gd = groupDelay(linearPhasePoints([1e6], 1e-9), 0);
+    expect(gd).toHaveLength(1);
+    expect(gd[0]).toBeNaN();
   });
 });

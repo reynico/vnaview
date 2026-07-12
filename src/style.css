@@ -414,7 +414,7 @@ main.dropping::after {
 /* Marker readout overlay */
 #marker-overlay {
   position: absolute;
-  top: 0.5rem;
+  bottom: 0.5rem;
   right: 0.5rem;
   background: var(--overlay-bg);
   border: 2px solid var(--border);
@@ -532,4 +532,20 @@ main.dropping::after {
 
 [hidden] {
   display: none !important;
+}
+
+@media print {
+  header nav,
+  #compare,
+  #export-csv,
+  #clear,
+  #lang-toggle,
+  #theme-toggle,
+  #repo-link,
+  #file-bar .chip-remove,
+  #softkey-rail,
+  #freq-bar,
+  #bw-overlay {
+    display: none !important;
+  }
 }

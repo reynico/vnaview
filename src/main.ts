@@ -1,8 +1,10 @@
-import { parse, toDB, toPhase, toVSWR } from './parser';
+import { parse, toDB, toPhase, toVSWR, groupDelay } from './parser';
 import { render, PARAM_NAMES, SINGLE_COLORS, type View, type ChartEntry, type Marker } from './chart';
 import { findPeak, findMin, findNextPeak, findBandwidth, type BandwidthResult } from './markers';
+import { evaluateLimits, type LimitLine } from './limits';
 import type { TouchstoneData, Complex } from './parser';
 import { getLang, setLang, t, getTheme, setTheme, type Lang } from './prefs';
+import { buildCSV, downloadBlob } from './export';
 import './style.css';
 
 document.documentElement.lang = getLang();
@@ -16,6 +18,16 @@ interface LoadedFile {
 
 const FILE_COLORS = ['#33ff33', '#ffb000', '#7dffb2', '#ff5533', '#c8ff33', '#ffdd55', '#33ffcc', '#ff8855'];
 const MAX_MARKERS = 6;
+const MEMORY_COLOR = '#7a8a99';
+
+// Views with a Re/Im(Γ) plane instead of a linear frequency axis: no freq
+// bar, no dB/DIV scale bar, marker placement snaps to nearest point in x/y
+// space rather than reading frequency off the x-axis.
+const POLAR_LIKE_VIEWS = new Set<View>(['smith', 'polar']);
+// Views where marker peak/min/next-peak/BW search doesn't apply: the above,
+// plus Group Delay, whose value is a derivative across points rather than a
+// per-point transform the search helpers can evaluate directly.
+const NO_SEARCH_VIEWS = new Set<View>(['smith', 'polar', 'groupdelay']);
 
 let files: LoadedFile[] = [];
 let activeFile: string | null = null;
@@ -25,9 +37,30 @@ const markers: Marker[] = [];
 let nextMarkerId = 1;
 let activeMarkerId: number | null = null;
 let deltaRefId: number | null = null;
+type ScaleView = 'db' | 'phase' | 'vswr' | 'groupdelay';
+const SCALE_UNITS: Record<ScaleView, string> = { db: 'dB', phase: '°', vswr: 'VSWR', groupdelay: 'ns' };
+function defaultScaleState(): Record<ScaleView, { perDiv: number; ref: number }> {
+  return {
+    db: { perDiv: 10, ref: 0 },
+    phase: { perDiv: 45, ref: 0 },
+    vswr: { perDiv: 0.2, ref: 3 },
+    groupdelay: { perDiv: 5, ref: 0 },
+  };
+}
+let scaleState = defaultScaleState();
 let dbPerDiv = 10;
 let refLevel = 0;
 let freqRange: [number, number] | null = null;
+
+let limitUpperEnabled = false;
+let limitLowerEnabled = false;
+
+interface MemoryTrace {
+  name: string;
+  data: TouchstoneData;
+}
+let memoryTrace: MemoryTrace | null = null;
+let memoryVisible = false;
 
 const mainEl = document.querySelector('main')!;
 const dropZone = document.getElementById('drop-zone')!;
@@ -38,6 +71,7 @@ const viewNav = document.getElementById('views')!;
 const fileBar = document.getElementById('file-bar')!;
 const fileChips = document.getElementById('file-chips')!;
 const compareBtn = document.getElementById('compare')!;
+const exportCsvBtn = document.getElementById('export-csv')!;
 const clearBtn = document.getElementById('clear')!;
 const markerOverlay = document.getElementById('marker-overlay')!;
 const markerTableBody = document.querySelector('#marker-table tbody')!;
@@ -45,6 +79,8 @@ const markerDeltaToggle = document.getElementById('marker-delta-toggle') as HTML
 const scaleBar = document.getElementById('scale-bar')!;
 const scaleDivInput = document.getElementById('scale-div') as HTMLInputElement;
 const scaleRefInput = document.getElementById('scale-ref') as HTMLInputElement;
+const scaleDivUnitEl = document.getElementById('scale-div-unit')!;
+const scaleRefUnitEl = document.getElementById('scale-ref-unit')!;
 const scaleAutoBtn = document.getElementById('scale-auto')!;
 const freqBar = document.getElementById('freq-bar')!;
 const freqStartInput = document.getElementById('freq-start') as HTMLInputElement;
@@ -64,6 +100,13 @@ const bwThresholdInput = document.getElementById('bw-threshold') as HTMLInputEle
 const bwOverlay = document.getElementById('bw-overlay')!;
 const langToggleBtn = document.getElementById('lang-toggle') as HTMLButtonElement;
 const themeToggleBtn = document.getElementById('theme-toggle') as HTMLButtonElement;
+const limitUpperInput = document.getElementById('limit-upper') as HTMLInputElement;
+const limitLowerInput = document.getElementById('limit-lower') as HTMLInputElement;
+const limitUpperToggleBtn = document.getElementById('limit-upper-toggle') as HTMLButtonElement;
+const limitLowerToggleBtn = document.getElementById('limit-lower-toggle') as HTMLButtonElement;
+const memorySaveBtn = document.getElementById('memory-save') as HTMLButtonElement;
+const memoryToggleBtn = document.getElementById('memory-toggle') as HTMLButtonElement;
+const memoryClearBtn = document.getElementById('memory-clear') as HTMLButtonElement;
 
 function applyI18n(): void {
   document.querySelectorAll<HTMLElement>('[data-i18n]').forEach((el) => {
@@ -86,6 +129,23 @@ function nextColor(): string {
   return FILE_COLORS[files.length % FILE_COLORS.length];
 }
 
+function cssVar(name: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+function currentLimits(): LimitLine[] {
+  const limits: LimitLine[] = [];
+  if (limitUpperEnabled) {
+    const v = parseFloat(limitUpperInput.value);
+    if (Number.isFinite(v)) limits.push({ kind: 'upper', value: v });
+  }
+  if (limitLowerEnabled) {
+    const v = parseFloat(limitLowerInput.value);
+    if (Number.isFinite(v)) limits.push({ kind: 'lower', value: v });
+  }
+  return limits;
+}
+
 function load(file: File): void {
   const reader = new FileReader();
   reader.onload = (e) => {
@@ -103,10 +163,12 @@ function load(file: File): void {
     scopeArea.hidden = false;
     viewNav.hidden = false;
     clearBtn.hidden = false;
+    exportCsvBtn.hidden = false;
     softkeyRail.hidden = false;
 
     renderFileBar();
     updateScaleBarVisibility();
+    applyScaleForView();
     renderMarkerTable();
     renderChart().then(() => {
       attachClickListener();
@@ -136,17 +198,23 @@ function reset(): void {
   nextMarkerId = 1;
   activeMarkerId = null;
   deltaRefId = null;
-  dbPerDiv = 10;
-  refLevel = 0;
+  scaleState = defaultScaleState();
+  applyScaleForView();
   freqRange = null;
-  scaleDivInput.value = String(dbPerDiv);
-  scaleRefInput.value = String(refLevel);
+  limitUpperEnabled = false;
+  limitLowerEnabled = false;
+  limitUpperToggleBtn.classList.remove('active');
+  limitLowerToggleBtn.classList.remove('active');
+  memoryTrace = null;
+  memoryVisible = false;
+  memoryToggleBtn.classList.remove('active');
   dropZone.hidden = false;
   scopeArea.hidden = true;
   viewNav.hidden = true;
   fileBar.hidden = true;
   clearBtn.hidden = true;
   compareBtn.hidden = true;
+  exportCsvBtn.hidden = true;
   scaleBar.hidden = true;
   freqBar.hidden = true;
   softkeyRail.hidden = true;
@@ -155,25 +223,40 @@ function reset(): void {
   renderMarkerTable();
 }
 
+function applyScaleForView(): void {
+  if (POLAR_LIKE_VIEWS.has(view)) return;
+  const s = scaleState[view as ScaleView];
+  dbPerDiv = s.perDiv;
+  refLevel = s.ref;
+  scaleDivInput.value = String(dbPerDiv);
+  scaleRefInput.value = String(refLevel);
+  scaleDivUnitEl.textContent = SCALE_UNITS[view as ScaleView];
+  scaleRefUnitEl.textContent = SCALE_UNITS[view as ScaleView];
+}
+
 function updateScaleBarVisibility(): void {
-  scaleBar.hidden = files.length === 0 || view !== 'db';
+  scaleBar.hidden = files.length === 0 || POLAR_LIKE_VIEWS.has(view);
 }
 
 function autoscaleOnce(): void {
+  if (POLAR_LIKE_VIEWS.has(view)) return;
   const entries = activeEntries();
   if (entries.length === 0) return;
+  const fn = currentValueFn();
   let maxVal = -Infinity;
   for (const { data } of entries) {
     const count = compareMode ? (data.ports === 1 ? 1 : 2) : data.ports === 1 ? 1 : 4;
     for (let i = 0; i < count; i++) {
-      for (const p of data.points) {
-        const v = toDB(p.params[i]);
+      // groupDelay is a derivative across points, not a per-point valueFn.
+      const values = view === 'groupdelay' ? groupDelay(data.points, i).map((v) => v * 1e9) : data.points.map((p) => fn(p.params[i]));
+      for (const v of values) {
         if (Number.isFinite(v) && v > maxVal) maxVal = v;
       }
     }
   }
   if (!Number.isFinite(maxVal)) return;
   refLevel = Math.ceil(maxVal / dbPerDiv) * dbPerDiv;
+  scaleState[view as ScaleView].ref = refLevel;
   scaleRefInput.value = String(refLevel);
   renderChart();
 }
@@ -183,7 +266,12 @@ function activeEntries(): ChartEntry[] {
     return files.map((f) => ({ label: f.name, color: f.color, data: f.data }));
   }
   const f = files.find((f) => f.name === activeFile);
-  return f ? [{ label: f.name, color: f.color, data: f.data }] : [];
+  if (!f) return [];
+  const entries: ChartEntry[] = [{ label: f.name, color: f.color, data: f.data }];
+  if (memoryVisible && memoryTrace) {
+    entries.push({ label: `${memoryTrace.name} (mem)`, color: MEMORY_COLOR, data: memoryTrace.data, isMemory: true });
+  }
+  return entries;
 }
 
 function renderChart(): Promise<void> {
@@ -191,7 +279,21 @@ function renderChart(): Promise<void> {
   if (entries.length === 0) return Promise.resolve();
   renderTraceInfoBar(entries);
   renderFreqBar(entries);
-  return render(chartEl, entries, view, markers, dbPerDiv, refLevel, freqRange, activeMarkerId, deltaRefId);
+  const limitUpper = view === 'db' && limitUpperEnabled ? parseFloat(limitUpperInput.value) : NaN;
+  const limitLower = view === 'db' && limitLowerEnabled ? parseFloat(limitLowerInput.value) : NaN;
+  return render(
+    chartEl,
+    entries,
+    view,
+    markers,
+    dbPerDiv,
+    refLevel,
+    freqRange,
+    activeMarkerId,
+    deltaRefId,
+    Number.isFinite(limitUpper) ? limitUpper : null,
+    Number.isFinite(limitLower) ? limitLower : null,
+  );
 }
 
 function dataExtent(entries: ChartEntry[]): [number, number] | null {
@@ -207,7 +309,7 @@ function dataExtent(entries: ChartEntry[]): [number, number] | null {
 }
 
 function renderFreqBar(entries: ChartEntry[]): void {
-  freqBar.hidden = entries.length === 0 || view === 'smith';
+  freqBar.hidden = entries.length === 0 || POLAR_LIKE_VIEWS.has(view);
   if (freqBar.hidden) return;
   const range = freqRange ?? dataExtent(entries);
   if (!range) return;
@@ -235,7 +337,12 @@ function applyCenterSpan(): void {
 }
 
 function formatLabel(v: View): string {
-  return v === 'db' ? 'dB Mag' : v === 'phase' ? t('phase') : v === 'vswr' ? 'VSWR' : 'Smith Chart';
+  return v === 'db' ? 'dB Mag'
+    : v === 'phase' ? t('phase')
+    : v === 'vswr' ? 'VSWR'
+    : v === 'groupdelay' ? t('groupDelay')
+    : v === 'polar' ? t('polar')
+    : 'Smith Chart';
 }
 
 function renderTraceInfoBar(entries: ChartEntry[]): void {
@@ -251,7 +358,8 @@ function renderTraceInfoBar(entries: ChartEntry[]): void {
 
   const compare = entries.length > 1;
   const label = formatLabel(view);
-  const scaleSuffix = view === 'db' ? ` · ${dbPerDiv}dB/ REF ${refLevel}dB` : '';
+  const scaleUnit = !POLAR_LIKE_VIEWS.has(view) ? SCALE_UNITS[view as ScaleView] : '';
+  const scaleSuffix = !POLAR_LIKE_VIEWS.has(view) ? ` · ${dbPerDiv}${scaleUnit}/DIV · REF ${refLevel}${scaleUnit}` : '';
 
   for (const entry of entries) {
     if (view === 'smith') {
@@ -276,6 +384,20 @@ function renderTraceInfoBar(entries: ChartEntry[]): void {
       const name = compare ? `${entry.label} · ${PARAM_NAMES[i]}` : PARAM_NAMES[i];
       const color = compare ? entry.color : SINGLE_COLORS[i];
       addChip(color, `${name} · ${label}${scaleSuffix}`);
+    }
+  }
+
+  if (view === 'db') {
+    const limits = currentLimits();
+    if (limits.length > 0) {
+      let anyFail = false;
+      for (const entry of entries) {
+        const count = compare ? (entry.data.ports === 1 ? 1 : 2) : entry.data.ports === 1 ? 1 : 4;
+        for (let i = 0; i < count; i++) {
+          if (!evaluateLimits(entry.data.points, i, toDB, limits).pass) anyFail = true;
+        }
+      }
+      addChip(anyFail ? cssVar('--danger') : cssVar('--text'), anyFail ? t('limitFail') : t('limitPass'));
     }
   }
 }
@@ -313,6 +435,19 @@ function markerRawValue(marker: Marker): number | null {
   if (compareMode) return null;
   const f = files.find((f) => f.name === activeFile);
   if (!f) return null;
+  if (view === 'groupdelay') {
+    const gd = groupDelay(f.data.points, marker.param);
+    let idx = 0;
+    let minDist = Infinity;
+    f.data.points.forEach((p, i) => {
+      const d = Math.abs(p.freq - marker.freq);
+      if (d < minDist) {
+        minDist = d;
+        idx = i;
+      }
+    });
+    return gd[idx] * 1e9;
+  }
   const pt = f.data.points.reduce((a, b) =>
     Math.abs(b.freq - marker.freq) < Math.abs(a.freq - marker.freq) ? b : a,
   );
@@ -329,6 +464,7 @@ function formatMarkerValue(raw: number | null): string {
   if (view === 'db') return `${raw.toFixed(2)} dB`;
   if (view === 'phase') return `${raw.toFixed(1)}°`;
   if (view === 'vswr') return `VSWR ${raw.toFixed(2)}`;
+  if (view === 'groupdelay') return `${raw.toFixed(2)} ns`;
   return '';
 }
 
@@ -337,6 +473,7 @@ function formatDeltaValue(raw: number): string {
   if (view === 'db') return `${sign}${raw.toFixed(2)} dB`;
   if (view === 'phase') return `${sign}${raw.toFixed(1)}°`;
   if (view === 'vswr') return `${sign}${raw.toFixed(2)}`;
+  if (view === 'groupdelay') return `${sign}${raw.toFixed(2)} ns`;
   return '';
 }
 
@@ -367,7 +504,7 @@ function addMarker(freq: number, param: number): Marker {
 function updateRailState(): void {
   const hasFile = files.length > 0;
   const hasActive = activeMarkerId !== null;
-  const searchEnabled = hasFile && hasActive && view !== 'smith' && !compareMode;
+  const searchEnabled = hasFile && hasActive && !NO_SEARCH_VIEWS.has(view) && !compareMode;
   searchPeakBtn.disabled = !searchEnabled;
   searchMinBtn.disabled = !searchEnabled;
   searchNextLeftBtn.disabled = !searchEnabled;
@@ -376,6 +513,11 @@ function updateRailState(): void {
   markerClearActiveBtn.disabled = !hasActive;
   markerClearAllBtn.disabled = markers.length === 0;
   bwSearchBtn.disabled = !(hasFile && hasActive && view === 'db' && !compareMode);
+  limitUpperToggleBtn.disabled = !hasFile;
+  limitLowerToggleBtn.disabled = !hasFile;
+  memorySaveBtn.disabled = !hasFile || compareMode;
+  memoryToggleBtn.disabled = !memoryTrace;
+  memoryClearBtn.disabled = !memoryTrace;
 }
 
 let lastBwResult: BandwidthResult | null = null;
@@ -470,7 +612,7 @@ function attachClickListener(): void {
     // is actually closest to the click in data space so markers land on the curve
     // the user visually clicked, not just the first trace Plotly happens to list.
     let pt = candidates[0];
-    if (view !== 'smith' && candidates.length > 1 && ev.event) {
+    if (!POLAR_LIKE_VIEWS.has(view) && candidates.length > 1 && ev.event) {
       const layout = (chartEl as any)._fullLayout;
       const bb = chartEl.getBoundingClientRect();
       const pixelY = ev.event.clientY - bb.top - layout.margin.t;
@@ -482,12 +624,15 @@ function attachClickListener(): void {
 
     let freqHz: number;
     let param = 0;
-    if (view === 'smith') {
-      const ref = compareMode ? files[0] : files.find((f) => f.name === activeFile);
+    if (POLAR_LIKE_VIEWS.has(view)) {
+      const name = pt.data.name as string;
+      const idx = view === 'polar' ? PARAM_NAMES.findIndex((n) => name.includes(n)) : 0;
+      param = idx >= 0 ? idx : 0;
+      const ref = compareMode ? files.find((f) => name.startsWith(f.name)) ?? files[0] : files.find((f) => f.name === activeFile);
       if (!ref) return;
       const closest = ref.data.points.reduce((a, b) =>
-        (b.params[0].re - pt.x) ** 2 + (b.params[0].im - pt.y) ** 2 <
-        (a.params[0].re - pt.x) ** 2 + (a.params[0].im - pt.y) ** 2
+        (b.params[param].re - pt.x) ** 2 + (b.params[param].im - pt.y) ** 2 <
+        (a.params[param].re - pt.x) ** 2 + (a.params[param].im - pt.y) ** 2
           ? b
           : a,
       );
@@ -514,7 +659,7 @@ function attachRelayoutListener(): void {
   relayoutListenerAttached = true;
 
   (chartEl as any).on('plotly_relayout', (ev: any) => {
-    if (view === 'smith') return;
+    if (POLAR_LIKE_VIEWS.has(view)) return;
     if (ev['xaxis.autorange']) {
       freqRange = null;
       renderFreqBar(activeEntries());
@@ -568,6 +713,7 @@ viewNav.querySelectorAll<HTMLButtonElement>('button').forEach((btn) => {
     viewNav.querySelectorAll('button').forEach((b) => b.classList.remove('active'));
     btn.classList.add('active');
     updateScaleBarVisibility();
+    applyScaleForView();
     bwOverlay.hidden = true;
     renderMarkerTable();
     renderChart();
@@ -585,20 +731,75 @@ compareBtn.addEventListener('click', () => {
 
 clearBtn.addEventListener('click', reset);
 
+exportCsvBtn.addEventListener('click', () => {
+  const entries = activeEntries();
+  if (entries.length === 0) return;
+  const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const base = compareMode ? 'compare' : (activeFile ?? 'trace').replace(/\.[^.]+$/, '');
+  downloadBlob(`${base}_${date}.csv`, buildCSV(entries), 'text/csv');
+});
+
 scaleDivInput.addEventListener('change', () => {
   const v = parseFloat(scaleDivInput.value);
-  if (Number.isFinite(v) && v > 0) {
+  if (Number.isFinite(v) && v > 0 && !POLAR_LIKE_VIEWS.has(view)) {
     dbPerDiv = v;
+    scaleState[view as ScaleView].perDiv = v;
     renderChart();
   }
 });
 
 scaleRefInput.addEventListener('change', () => {
   const v = parseFloat(scaleRefInput.value);
-  if (Number.isFinite(v)) {
+  if (Number.isFinite(v) && !POLAR_LIKE_VIEWS.has(view)) {
     refLevel = v;
+    scaleState[view as ScaleView].ref = v;
     renderChart();
   }
+});
+
+limitUpperToggleBtn.addEventListener('click', () => {
+  limitUpperEnabled = !limitUpperEnabled;
+  limitUpperToggleBtn.classList.toggle('active', limitUpperEnabled);
+  renderChart();
+});
+
+limitLowerToggleBtn.addEventListener('click', () => {
+  limitLowerEnabled = !limitLowerEnabled;
+  limitLowerToggleBtn.classList.toggle('active', limitLowerEnabled);
+  renderChart();
+});
+
+limitUpperInput.addEventListener('change', () => {
+  if (limitUpperEnabled) renderChart();
+});
+
+limitLowerInput.addEventListener('change', () => {
+  if (limitLowerEnabled) renderChart();
+});
+
+memorySaveBtn.addEventListener('click', () => {
+  const f = files.find((f) => f.name === activeFile);
+  if (!f || compareMode) return;
+  memoryTrace = { name: f.name, data: f.data };
+  memoryVisible = true;
+  memoryToggleBtn.classList.add('active');
+  updateRailState();
+  renderChart();
+});
+
+memoryToggleBtn.addEventListener('click', () => {
+  if (!memoryTrace) return;
+  memoryVisible = !memoryVisible;
+  memoryToggleBtn.classList.toggle('active', memoryVisible);
+  renderChart();
+});
+
+memoryClearBtn.addEventListener('click', () => {
+  memoryTrace = null;
+  memoryVisible = false;
+  memoryToggleBtn.classList.remove('active');
+  updateRailState();
+  renderChart();
 });
 
 scaleAutoBtn.addEventListener('click', autoscaleOnce);
