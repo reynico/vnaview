@@ -198,7 +198,9 @@ export function render(
     : view === 'groupdelay' ? `${t('groupDelay')} (ns)`
     : 'VSWR';
 
-  const shapes: Partial<Plotly.Shape>[] = markers.map((m) => ({
+  // editable so the user can drag a marker's line to reposition it (snapped
+  // to the nearest sampled frequency on drop, see attachRelayoutListener).
+  const shapes: Array<Partial<Plotly.Shape> & { editable?: boolean }> = markers.map((m) => ({
     type: 'line',
     x0: m.freq / 1e6,
     x1: m.freq / 1e6,
@@ -206,6 +208,7 @@ export function render(
     y1: 1,
     yref: 'paper' as const,
     line: { color: MARKER_COLOR, width: 1, dash: 'dot' },
+    editable: true,
   }));
 
   if (view === 'db') {
@@ -219,6 +222,7 @@ export function render(
         y0: limitValue,
         y1: limitValue,
         line: { color: theme().danger, width: 1.5, dash: 'dash' },
+        editable: false,
       });
     }
   }
@@ -240,6 +244,7 @@ export function render(
     },
     {
       responsive: true,
+      edits: { shapePosition: true },
       toImageButtonOptions: { format: 'png', filename: exportFilename(entries, view), scale: 2 },
     },
   ).then(() => Plotly.Plots.resize(el));

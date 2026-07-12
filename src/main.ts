@@ -587,6 +587,12 @@ function renderFileBar(): void {
   }
 }
 
+function nearestSampledFreq(freqHz: number): number {
+  const points = activeEntries()[0]?.data.points;
+  if (!points || points.length === 0) return freqHz;
+  return points.reduce((a, b) => (Math.abs(b.freq - freqHz) < Math.abs(a.freq - freqHz) ? b : a)).freq;
+}
+
 function markerRawValue(marker: Marker): number | null {
   if (compareMode) return null;
   const f = files.find((f) => f.name === activeFile);
@@ -835,6 +841,27 @@ function attachRelayoutListener(): void {
 
   (chartEl as any).on('plotly_relayout', (ev: any) => {
     if (POLAR_LIKE_VIEWS.has(view)) return;
+
+    const draggedShapes = new Set<number>();
+    for (const key of Object.keys(ev)) {
+      const match = key.match(/^shapes\[(\d+)\]\.x[01]$/);
+      if (match) draggedShapes.add(Number(match[1]));
+    }
+    if (draggedShapes.size > 0) {
+      for (const i of draggedShapes) {
+        const marker = markers[i];
+        if (!marker) continue;
+        const x0 = ev[`shapes[${i}].x0`];
+        const x1 = ev[`shapes[${i}].x1`];
+        const xMHz = x0 !== undefined && x1 !== undefined ? (x0 + x1) / 2 : (x0 ?? x1);
+        if (typeof xMHz !== 'number') continue;
+        marker.freq = nearestSampledFreq(xMHz * 1e6);
+      }
+      renderMarkerTable();
+      renderChart();
+      return;
+    }
+
     if (ev['xaxis.autorange']) {
       freqRange = null;
       renderFreqBar(activeEntries());
