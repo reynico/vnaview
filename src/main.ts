@@ -207,6 +207,8 @@ function reset(): void {
   nextMarkerId = 1;
   activeMarkerId = null;
   deltaRefId = null;
+  bwLowMarkerId = null;
+  bwHighMarkerId = null;
   hiddenTraces.clear();
   scaleState = defaultScaleState();
   applyScaleForView();
@@ -543,6 +545,17 @@ function updateRailState(): void {
 
 let lastBwResult: BandwidthResult | null = null;
 let lastBwThreshold = 3;
+let bwLowMarkerId: number | null = null;
+let bwHighMarkerId: number | null = null;
+
+// Bandwidths span kHz (crystal filters) to hundreds of MHz (RF filters), so
+// pick whichever unit keeps the mantissa readable instead of always using kHz.
+function formatFreqSpan(hz: number): string {
+  const abs = Math.abs(hz);
+  if (abs >= 1e6) return `${(hz / 1e6).toFixed(3)} MHz`;
+  if (abs >= 1e3) return `${(hz / 1e3).toFixed(1)} kHz`;
+  return `${hz.toFixed(0)} Hz`;
+}
 
 function renderBwOverlay(result: BandwidthResult | null, thresholdDb: number): void {
   lastBwResult = result;
@@ -553,7 +566,15 @@ function renderBwOverlay(result: BandwidthResult | null, thresholdDb: number): v
     return;
   }
   const q = Number.isFinite(result.q) ? result.q.toFixed(1) : '—';
-  bwOverlay.textContent = `BW ${(result.bandwidth / 1e3).toFixed(1)} kHz · CTR ${(result.centerFreq / 1e6).toFixed(3)} MHz · Q ${q} · -${thresholdDb}dB`;
+  bwOverlay.textContent = `BW ${formatFreqSpan(result.bandwidth)} · CTR ${(result.centerFreq / 1e6).toFixed(3)} MHz · Q ${q} · -${thresholdDb}dB`;
+}
+
+function removeMarkerById(id: number | null): void {
+  if (id === null) return;
+  const i = markers.findIndex((x) => x.id === id);
+  if (i >= 0) markers.splice(i, 1);
+  if (activeMarkerId === id) activeMarkerId = null;
+  if (deltaRefId === id) deltaRefId = null;
 }
 
 function renderMarkerTable(): void {
@@ -585,8 +606,8 @@ function renderMarkerTable(): void {
     const valCell = document.createElement('td');
 
     if (ref && ref.id !== m.id) {
-      const dFreqMHz = (m.freq - ref.freq) / 1e6;
-      freqCell.textContent = `${dFreqMHz >= 0 ? '+' : ''}${dFreqMHz.toFixed(3)} MHz`;
+      const dFreq = m.freq - ref.freq;
+      freqCell.textContent = `${dFreq >= 0 ? '+' : ''}${formatFreqSpan(dFreq)}`;
       const rawM = markerRawValue(m);
       const rawRef = markerRawValue(ref);
       valCell.textContent = rawM !== null && rawRef !== null ? formatDeltaValue(rawM - rawRef) : '';
@@ -903,6 +924,8 @@ markerClearAllBtn.addEventListener('click', () => {
   markers.length = 0;
   activeMarkerId = null;
   deltaRefId = null;
+  bwLowMarkerId = null;
+  bwHighMarkerId = null;
   bwOverlay.hidden = true;
   renderMarkerTable();
   renderChart();
@@ -915,9 +938,27 @@ bwSearchBtn.addEventListener('click', () => {
   const threshold = parseFloat(bwThresholdInput.value);
   if (!Number.isFinite(threshold) || threshold <= 0) return;
 
-  const peakPt = findPeak(f.data.points, m.param, toDB);
-  m.freq = peakPt.freq;
-  const result = findBandwidth(f.data.points, m.param, toDB, peakPt.freq, threshold);
+  const param = m.param;
+  // If the active marker is the seed the user placed (not a leftover edge
+  // marker from a prior search), it gets replaced by the new edge pair
+  // instead of sticking around as a redundant third marker.
+  const seedId = m.id !== bwLowMarkerId && m.id !== bwHighMarkerId ? m.id : null;
+  const peakPt = findPeak(f.data.points, param, toDB);
+  const result = findBandwidth(f.data.points, param, toDB, peakPt.freq, threshold);
+
+  if (result) {
+    removeMarkerById(bwLowMarkerId);
+    removeMarkerById(bwHighMarkerId);
+    if (seedId !== null) removeMarkerById(seedId);
+
+    const low = addMarker(result.lowFreq, param);
+    const high = addMarker(result.highFreq, param);
+    bwLowMarkerId = low.id;
+    bwHighMarkerId = high.id;
+    deltaRefId = low.id;
+    activeMarkerId = high.id;
+  }
+
   renderBwOverlay(result, threshold);
   renderMarkerTable();
   renderChart();
