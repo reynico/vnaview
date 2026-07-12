@@ -130,6 +130,20 @@ button.active {
   color: var(--text);
 }
 
+#build-version {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-family: monospace;
+  text-decoration: none;
+  margin-left: 0.1rem;
+  opacity: 0.7;
+  transition: opacity 0.15s;
+}
+
+#build-version:hover {
+  opacity: 1;
+}
+
 /* File bar */
 #file-bar {
   display: flex;
@@ -571,6 +585,7 @@ button.trace-info:hover {
   #lang-toggle,
   #theme-toggle,
   #repo-link,
+  #build-version,
   #file-bar .chip-remove,
   #softkey-rail,
   #freq-bar,

@@ -11,6 +11,13 @@ import './style.css';
 document.documentElement.lang = getLang();
 document.documentElement.dataset.theme = getTheme();
 
+const buildVersionEl = document.getElementById('build-version') as HTMLAnchorElement | null;
+if (buildVersionEl) {
+  buildVersionEl.textContent = __GIT_COMMIT__;
+  buildVersionEl.href = `https://github.com/reynico/vnaview/commit/${__GIT_COMMIT__}`;
+  buildVersionEl.title = `Deployed commit ${__GIT_COMMIT__}`;
+}
+
 interface LoadedFile {
   name: string;
   data: TouchstoneData;
