@@ -50,6 +50,7 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     memorySave: 'Save Memory',
     memoryShow: 'Show Memory',
     memoryClear: 'Clear Memory',
+    traceToggleHint: 'Click to toggle trace on/off',
   },
   es: {
     compare: 'Comparar',
@@ -96,6 +97,7 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     memorySave: 'Guardar Memoria',
     memoryShow: 'Mostrar Memoria',
     memoryClear: 'Borrar Memoria',
+    traceToggleHint: 'Clic para activar/desactivar la traza',
   },
 };
 

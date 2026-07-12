@@ -124,13 +124,16 @@ export function render(
   deltaRefId: number | null = null,
   limitUpper: number | null = null,
   limitLower: number | null = null,
+  hiddenTraces: Set<string> = new Set(),
 ): Promise<void> {
   if (view === 'smith') {
-    return renderSmith(el, entries, markers, activeMarkerId, deltaRefId);
+    return renderSmith(el, entries, markers, activeMarkerId, deltaRefId, hiddenTraces);
   }
   if (view === 'polar') {
-    return renderPolar(el, entries, markers, activeMarkerId, deltaRefId);
+    return renderPolar(el, entries, markers, activeMarkerId, deltaRefId, hiddenTraces);
   }
+
+  const isHidden = (label: string, i: number) => hiddenTraces.has(`${label}#${i}`);
 
   const compare = entries.length > 1;
   const traces: Plotly.Data[] = [];
@@ -144,6 +147,7 @@ export function render(
       // S11 solid, S21 dashed (if 2-port); memory traces are always dotted/dimmed.
       paramsToPlot = data.ports === 1 ? [0] : [0, 1];
       for (const i of paramsToPlot) {
+        if (isHidden(label, i)) continue;
         const y = computeYValues(data, i, view);
         if (!isMemory) traces.push(glowTrace(freqs, y, color, 1.5));
         traces.push({
@@ -162,6 +166,7 @@ export function render(
       for (let i = 0; i < count; i++) {
         if (view === 'vswr' && i !== 0 && i !== 3) continue;
         paramsToPlot.push(i);
+        if (isHidden(label, i)) continue;
         const y = computeYValues(data, i, view);
         traces.push(glowTrace(freqs, y, SINGLE_COLORS[i], 1.5));
         traces.push({
@@ -177,6 +182,7 @@ export function render(
 
     if (isMemory) continue;
     for (const i of paramsToPlot) {
+      if (isHidden(label, i)) continue;
       const paramMarkers = markers.filter((m) => m.param === i);
       if (paramMarkers.length === 0) continue;
       const yValues = computeYValues(data, i, view);
@@ -298,11 +304,13 @@ function renderSmith(
   markers: Marker[],
   activeMarkerId: number | null = null,
   deltaRefId: number | null = null,
+  hiddenTraces: Set<string> = new Set(),
 ): Promise<void> {
   const traces: Plotly.Data[] = [...smithGrid()];
 
   for (const entry of entries) {
     const { label, color, data, isMemory } = entry;
+    if (hiddenTraces.has(`${label}#0`)) continue;
     const markerPoints = isMemory
       ? []
       : markers.map((m, idx) => {
@@ -381,13 +389,16 @@ function renderPolar(
   markers: Marker[],
   activeMarkerId: number | null = null,
   deltaRefId: number | null = null,
+  hiddenTraces: Set<string> = new Set(),
 ): Promise<void> {
   const compare = entries.length > 1;
+  const isHidden = (label: string, i: number) => hiddenTraces.has(`${label}#${i}`);
 
   let maxR = 1;
-  for (const { data } of entries) {
+  for (const { label, data } of entries) {
     const count = compare ? (data.ports === 1 ? 1 : 2) : data.ports === 1 ? 1 : 4;
     for (let i = 0; i < count; i++) {
+      if (isHidden(label, i)) continue;
       for (const p of data.points) {
         const m = mag(p.params[i]);
         if (m > maxR) maxR = m;
@@ -405,6 +416,7 @@ function renderPolar(
       : Array.from({ length: data.ports === 1 ? 1 : 4 }, (_, i) => i);
 
     for (const i of paramIdxs) {
+      if (isHidden(label, i)) continue;
       const traceColor = compare ? color : SINGLE_COLORS[i];
       const x = data.points.map((p) => p.params[i].re);
       const y = data.points.map((p) => p.params[i].im);

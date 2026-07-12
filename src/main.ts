@@ -37,6 +37,12 @@ const markers: Marker[] = [];
 let nextMarkerId = 1;
 let activeMarkerId: number | null = null;
 let deltaRefId: number | null = null;
+// Individually hidden traces, keyed by `${entryLabel}#${paramIndex}` so a
+// toggle survives view switches and re-renders of the same file/param.
+const hiddenTraces = new Set<string>();
+function traceKey(label: string, param: number): string {
+  return `${label}#${param}`;
+}
 type ScaleView = 'db' | 'phase' | 'vswr' | 'groupdelay';
 const SCALE_UNITS: Record<ScaleView, string> = { db: 'dB', phase: '°', vswr: 'VSWR', groupdelay: 'ns' };
 function defaultScaleState(): Record<ScaleView, { perDiv: number; ref: number }> {
@@ -180,6 +186,9 @@ function load(file: File): void {
 
 function removeFile(name: string): void {
   files = files.filter((f) => f.name !== name);
+  for (const key of hiddenTraces) {
+    if (key.startsWith(`${name}#`)) hiddenTraces.delete(key);
+  }
   if (files.length === 0) {
     reset();
     return;
@@ -198,6 +207,7 @@ function reset(): void {
   nextMarkerId = 1;
   activeMarkerId = null;
   deltaRefId = null;
+  hiddenTraces.clear();
   scaleState = defaultScaleState();
   applyScaleForView();
   freqRange = null;
@@ -244,9 +254,10 @@ function autoscaleOnce(): void {
   if (entries.length === 0) return;
   const fn = currentValueFn();
   let maxVal = -Infinity;
-  for (const { data } of entries) {
+  for (const { label, data } of entries) {
     const count = compareMode ? (data.ports === 1 ? 1 : 2) : data.ports === 1 ? 1 : 4;
     for (let i = 0; i < count; i++) {
+      if (hiddenTraces.has(traceKey(label, i))) continue;
       // groupDelay is a derivative across points, not a per-point valueFn.
       const values = view === 'groupdelay' ? groupDelay(data.points, i).map((v) => v * 1e9) : data.points.map((p) => fn(p.params[i]));
       for (const v of values) {
@@ -293,6 +304,7 @@ function renderChart(): Promise<void> {
     deltaRefId,
     Number.isFinite(limitUpper) ? limitUpper : null,
     Number.isFinite(limitLower) ? limitLower : null,
+    hiddenTraces,
   );
 }
 
@@ -349,10 +361,19 @@ function renderTraceInfoBar(entries: ChartEntry[]): void {
   traceInfoBar.innerHTML = '';
   if (entries.length === 0) return;
 
-  const addChip = (color: string, text: string) => {
-    const chip = document.createElement('span');
-    chip.className = 'trace-info';
+  const addChip = (color: string, text: string, key: string | null = null) => {
+    const chip = document.createElement(key ? 'button' : 'span');
+    chip.className = 'trace-info' + (key && hiddenTraces.has(key) ? ' off' : '');
     chip.innerHTML = `<span class="dot" style="background:${color}"></span>${text}`;
+    if (key) {
+      (chip as HTMLButtonElement).type = 'button';
+      chip.title = t('traceToggleHint');
+      chip.addEventListener('click', () => {
+        if (hiddenTraces.has(key)) hiddenTraces.delete(key);
+        else hiddenTraces.add(key);
+        renderChart();
+      });
+    }
     traceInfoBar.appendChild(chip);
   };
 
@@ -364,7 +385,7 @@ function renderTraceInfoBar(entries: ChartEntry[]): void {
   for (const entry of entries) {
     if (view === 'smith') {
       const name = compare ? entry.label : 'S11';
-      addChip(entry.color, `${name} · Smith Chart`);
+      addChip(entry.color, `${name} · Smith Chart`, traceKey(entry.label, 0));
       continue;
     }
 
@@ -383,7 +404,7 @@ function renderTraceInfoBar(entries: ChartEntry[]): void {
     for (const i of paramIdxs) {
       const name = compare ? `${entry.label} · ${PARAM_NAMES[i]}` : PARAM_NAMES[i];
       const color = compare ? entry.color : SINGLE_COLORS[i];
-      addChip(color, `${name} · ${label}${scaleSuffix}`);
+      addChip(color, `${name} · ${label}${scaleSuffix}`, traceKey(entry.label, i));
     }
   }
 
