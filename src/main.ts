@@ -5,6 +5,7 @@ import { evaluateLimits, type LimitLine } from './limits';
 import type { TouchstoneData, Complex } from './parser';
 import { getLang, setLang, t, getTheme, setTheme, type Lang } from './prefs';
 import { buildCSV, downloadBlob } from './export';
+import * as storage from './storage';
 import './style.css';
 
 document.documentElement.lang = getLang();
@@ -14,6 +15,7 @@ interface LoadedFile {
   name: string;
   data: TouchstoneData;
   color: string;
+  text: string;
 }
 
 const FILE_COLORS = ['#33ff33', '#ffb000', '#7dffb2', '#ff5533', '#c8ff33', '#ffdd55', '#33ffcc', '#ff8855'];
@@ -64,6 +66,7 @@ let limitLowerEnabled = false;
 interface MemoryTrace {
   name: string;
   data: TouchstoneData;
+  text: string;
 }
 let memoryTrace: MemoryTrace | null = null;
 let memoryVisible = false;
@@ -152,36 +155,65 @@ function currentLimits(): LimitLine[] {
   return limits;
 }
 
+function ingestText(name: string, text: string): void {
+  const data = parse(text, name);
+  const existing = files.findIndex((f) => f.name === name);
+  if (existing >= 0) {
+    files[existing].data = data;
+    files[existing].text = text;
+  } else {
+    files.push({ name, data, color: nextColor(), text });
+  }
+  activeFile = name;
+  compareMode = false;
+
+  dropZone.hidden = true;
+  scopeArea.hidden = false;
+  viewNav.hidden = false;
+  clearBtn.hidden = false;
+  exportCsvBtn.hidden = false;
+  softkeyRail.hidden = false;
+
+  renderFileBar();
+  updateScaleBarVisibility();
+  applyScaleForView();
+  renderMarkerTable();
+  renderChart().then(() => {
+    attachClickListener();
+    attachRelayoutListener();
+  });
+}
+
 function load(file: File): void {
   const reader = new FileReader();
   reader.onload = (e) => {
-    const data = parse(e.target!.result as string, file.name);
-    const existing = files.findIndex((f) => f.name === file.name);
-    if (existing >= 0) {
-      files[existing].data = data;
-    } else {
-      files.push({ name: file.name, data, color: nextColor() });
-    }
-    activeFile = file.name;
-    compareMode = false;
-
-    dropZone.hidden = true;
-    scopeArea.hidden = false;
-    viewNav.hidden = false;
-    clearBtn.hidden = false;
-    exportCsvBtn.hidden = false;
-    softkeyRail.hidden = false;
-
-    renderFileBar();
-    updateScaleBarVisibility();
-    applyScaleForView();
-    renderMarkerTable();
-    renderChart().then(() => {
-      attachClickListener();
-      attachRelayoutListener();
-    });
+    const text = e.target!.result as string;
+    ingestText(file.name, text);
+    storage.saveFile(file.name, text).catch((err) => console.error('vnaviewer: failed to persist file', err));
   };
   reader.readAsText(file);
+}
+
+function restoreFromStorage(): void {
+  storage
+    .loadFiles()
+    .then((stored) => {
+      for (const { name, text } of stored) ingestText(name, text);
+    })
+    .catch((err) => console.error('vnaviewer: failed to restore files', err));
+
+  storage
+    .loadMemory()
+    .then((stored) => {
+      if (!stored) return;
+      const data = parse(stored.text, stored.name);
+      memoryTrace = { name: stored.name, data, text: stored.text };
+      memoryVisible = true;
+      memoryToggleBtn.classList.add('active');
+      updateRailState();
+      renderChart();
+    })
+    .catch((err) => console.error('vnaviewer: failed to restore memory trace', err));
 }
 
 function removeFile(name: string): void {
@@ -189,6 +221,7 @@ function removeFile(name: string): void {
   for (const key of hiddenTraces) {
     if (key.startsWith(`${name}#`)) hiddenTraces.delete(key);
   }
+  storage.deleteFile(name).catch((err) => console.error('vnaviewer: failed to remove persisted file', err));
   if (files.length === 0) {
     reset();
     return;
@@ -220,6 +253,8 @@ function reset(): void {
   memoryTrace = null;
   memoryVisible = false;
   memoryToggleBtn.classList.remove('active');
+  storage.clearFiles().catch((err) => console.error('vnaviewer: failed to clear persisted files', err));
+  storage.clearMemory().catch((err) => console.error('vnaviewer: failed to clear persisted memory', err));
   dropZone.hidden = false;
   scopeArea.hidden = true;
   viewNav.hidden = true;
@@ -822,9 +857,10 @@ limitLowerInput.addEventListener('change', () => {
 memorySaveBtn.addEventListener('click', () => {
   const f = files.find((f) => f.name === activeFile);
   if (!f || compareMode) return;
-  memoryTrace = { name: f.name, data: f.data };
+  memoryTrace = { name: f.name, data: f.data, text: f.text };
   memoryVisible = true;
   memoryToggleBtn.classList.add('active');
+  storage.saveMemory(f.name, f.text).catch((err) => console.error('vnaviewer: failed to persist memory trace', err));
   updateRailState();
   renderChart();
 });
@@ -840,6 +876,7 @@ memoryClearBtn.addEventListener('click', () => {
   memoryTrace = null;
   memoryVisible = false;
   memoryToggleBtn.classList.remove('active');
+  storage.clearMemory().catch((err) => console.error('vnaviewer: failed to clear persisted memory', err));
   updateRailState();
   renderChart();
 });
@@ -977,3 +1014,4 @@ themeToggleBtn.addEventListener('click', () => {
 });
 
 applyI18n();
+restoreFromStorage();
