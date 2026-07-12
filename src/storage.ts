@@ -39,6 +39,11 @@ export async function deleteFile(name: string): Promise<void> {
   await withStore(FILES_STORE, 'readwrite', (s) => s.delete(name));
 }
 
+export async function renameFile(oldName: string, newName: string, text: string): Promise<void> {
+  await deleteFile(oldName);
+  await saveFile(newName, text);
+}
+
 export async function clearFiles(): Promise<void> {
   await withStore(FILES_STORE, 'readwrite', (s) => s.clear());
 }

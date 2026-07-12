@@ -32,6 +32,7 @@ const POLAR_LIKE_VIEWS = new Set<View>(['smith', 'polar']);
 const NO_SEARCH_VIEWS = new Set<View>(['smith', 'polar', 'groupdelay']);
 
 let files: LoadedFile[] = [];
+let lastChipNameClick: { name: string; time: number } | null = null;
 let activeFile: string | null = null;
 let compareMode = false;
 let view: View = 'db';
@@ -460,6 +461,67 @@ function renderTraceInfoBar(entries: ChartEntry[]): void {
   }
 }
 
+function renameFile(oldName: string, newInputValue: string): void {
+  const file = files.find((f) => f.name === oldName);
+  if (!file) return;
+  const ext = oldName.slice(oldName.lastIndexOf('.'));
+  let base = newInputValue.trim();
+  if (base.toLowerCase().endsWith(ext.toLowerCase())) base = base.slice(0, base.length - ext.length);
+  base = base.trim();
+  if (!base) {
+    renderFileBar();
+    return;
+  }
+  const newName = base + ext;
+  if (newName === oldName || files.some((f) => f.name === newName)) {
+    renderFileBar();
+    return;
+  }
+
+  file.name = newName;
+  if (activeFile === oldName) activeFile = newName;
+  for (const key of Array.from(hiddenTraces)) {
+    if (key.startsWith(`${oldName}#`)) {
+      hiddenTraces.delete(key);
+      hiddenTraces.add(`${newName}#${key.slice(oldName.length + 1)}`);
+    }
+  }
+  storage.renameFile(oldName, newName, file.text).catch((err) => console.error('vnaviewer: failed to persist rename', err));
+  renderFileBar();
+  renderChart();
+}
+
+function startRenameEdit(chip: HTMLElement, nameEl: HTMLElement, file: LoadedFile): void {
+  const ext = file.name.slice(file.name.lastIndexOf('.'));
+  const base = file.name.slice(0, file.name.length - ext.length);
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'chip-name-input';
+  input.value = file.name;
+  chip.replaceChild(input, nameEl);
+  input.focus();
+  input.setSelectionRange(0, base.length);
+
+  let done = false;
+  input.addEventListener('blur', () => {
+    if (done) return;
+    done = true;
+    renameFile(file.name, input.value);
+  });
+  input.addEventListener('keydown', (e) => {
+    e.stopPropagation();
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      input.blur();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      done = true;
+      renderFileBar();
+    }
+  });
+  input.addEventListener('click', (e) => e.stopPropagation());
+}
+
 function renderFileBar(): void {
   fileBar.hidden = false;
   compareBtn.hidden = files.length < 2;
@@ -469,15 +531,44 @@ function renderFileBar(): void {
   for (const file of files) {
     const chip = document.createElement('span');
     chip.className = 'file-chip' + (file.name === activeFile && !compareMode ? ' active' : '');
-    chip.innerHTML = `
-      <span class="dot" style="background:${file.color}"></span>
-      <span class="chip-name">${file.name}</span>
-      <button class="chip-remove" title="Remove">×</button>
-    `;
-    chip.querySelector('.chip-remove')!.addEventListener('click', (e) => {
+
+    const dot = document.createElement('span');
+    dot.className = 'dot';
+    dot.style.background = file.color;
+
+    const nameEl = document.createElement('span');
+    nameEl.className = 'chip-name';
+    nameEl.textContent = file.name;
+    nameEl.title = t('renameHint');
+    // Renaming triggers a full renderFileBar() on the first click, which
+    // replaces this element — native dblclick tracking doesn't survive that
+    // mid-gesture swap, so double-clicks are detected manually by name+time.
+    nameEl.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const now = Date.now();
+      if (lastChipNameClick && lastChipNameClick.name === file.name && now - lastChipNameClick.time < 400) {
+        lastChipNameClick = null;
+        startRenameEdit(chip, nameEl, file);
+        return;
+      }
+      lastChipNameClick = { name: file.name, time: now };
+      activeFile = file.name;
+      compareMode = false;
+      compareBtn.classList.remove('active');
+      renderFileBar();
+      renderChart();
+    });
+
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'chip-remove';
+    removeBtn.title = 'Remove';
+    removeBtn.textContent = '×';
+    removeBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       removeFile(file.name);
     });
+
+    chip.append(dot, nameEl, removeBtn);
     chip.addEventListener('click', () => {
       activeFile = file.name;
       compareMode = false;
