@@ -1,4 +1,4 @@
-import { parse, toDB, toPhase, toVSWR, groupDelay } from './parser';
+import { parse, toDB, toPhase, toVSWR, toImpedance, groupDelay, mag } from './parser';
 import { render, PARAM_NAMES, singleColors, type View, type ChartEntry, type Marker } from './chart';
 import { findPeak, findMin, findNextPeak, findBandwidth, type BandwidthResult } from './markers';
 import { evaluateLimits, type LimitLine } from './limits';
@@ -83,6 +83,9 @@ interface MemoryTrace {
 }
 let memoryTrace: MemoryTrace | null = null;
 let memoryVisible = false;
+// Replaces the normal absolute-value display with a per-param (current -
+// memory) trace; only meaningful for the rectangular views, single-file mode.
+let memoryDeltaVisible = false;
 
 const mainEl = document.querySelector('main')!;
 const dropZone = document.getElementById('drop-zone')!;
@@ -128,6 +131,7 @@ const limitUpperToggleBtn = document.getElementById('limit-upper-toggle') as HTM
 const limitLowerToggleBtn = document.getElementById('limit-lower-toggle') as HTMLButtonElement;
 const memorySaveBtn = document.getElementById('memory-save') as HTMLButtonElement;
 const memoryToggleBtn = document.getElementById('memory-toggle') as HTMLButtonElement;
+const memoryDeltaToggleBtn = document.getElementById('memory-delta-toggle') as HTMLButtonElement;
 const memoryClearBtn = document.getElementById('memory-clear') as HTMLButtonElement;
 
 function applyI18n(): void {
@@ -281,7 +285,9 @@ function reset(): void {
   limitLowerToggleBtn.classList.remove('active');
   memoryTrace = null;
   memoryVisible = false;
+  memoryDeltaVisible = false;
   memoryToggleBtn.classList.remove('active');
+  memoryDeltaToggleBtn.classList.remove('active');
   storage.clearFiles().catch((err) => console.error('vnaviewer: failed to clear persisted files', err));
   storage.clearMemory().catch((err) => console.error('vnaviewer: failed to clear persisted memory', err));
   dropZone.hidden = false;
@@ -345,16 +351,21 @@ function activeEntries(): ChartEntry[] {
   const f = files.find((f) => f.name === activeFile);
   if (!f) return [];
   const entries: ChartEntry[] = [{ label: f.name, color: f.color, data: f.data }];
-  if (memoryVisible && memoryTrace) {
+  if ((memoryVisible || memoryDeltaVisible) && memoryTrace) {
     entries.push({ label: `${memoryTrace.name} (mem)`, color: memoryColor(), data: memoryTrace.data, isMemory: true });
   }
   return entries;
 }
 
+function showingMemoryDelta(): boolean {
+  return memoryDeltaVisible && memoryTrace !== null && !compareMode && !POLAR_LIKE_VIEWS.has(view);
+}
+
 function renderChart(): Promise<void> {
   const entries = activeEntries();
   if (entries.length === 0) return Promise.resolve();
-  renderTraceInfoBar(entries);
+  const deltaMode = showingMemoryDelta();
+  renderTraceInfoBar(entries, deltaMode);
   renderFreqBar(entries);
   const limitUpper = view === 'db' && limitUpperEnabled ? parseFloat(limitUpperInput.value) : NaN;
   const limitLower = view === 'db' && limitLowerEnabled ? parseFloat(limitLowerInput.value) : NaN;
@@ -372,6 +383,7 @@ function renderChart(): Promise<void> {
     Number.isFinite(limitLower) ? limitLower : null,
     hiddenTraces,
     traceOverrides,
+    deltaMode,
   );
 }
 
@@ -424,7 +436,7 @@ function formatLabel(v: View): string {
     : 'Smith Chart';
 }
 
-function renderTraceInfoBar(entries: ChartEntry[]): void {
+function renderTraceInfoBar(entries: ChartEntry[], deltaMode = false): void {
   traceInfoBar.innerHTML = '';
   if (entries.length === 0) return;
 
@@ -487,6 +499,20 @@ function renderTraceInfoBar(entries: ChartEntry[]): void {
 
     traceInfoBar.appendChild(chip);
   };
+
+  if (deltaMode) {
+    const main = entries.find((e) => !e.isMemory);
+    const memEntry = entries.find((e) => e.isMemory);
+    if (main && memEntry) {
+      const count = Math.min(main.data.ports === 1 ? 1 : 4, memEntry.data.ports === 1 ? 1 : 4);
+      const colors = singleColors();
+      for (let i = 0; i < count; i++) {
+        if (view === 'vswr' && i !== 0 && i !== 3) continue;
+        addChip(colors[i], `Δ ${PARAM_NAMES[i]} · vs ${memEntry.label}`);
+      }
+    }
+    return;
+  }
 
   const compare = entries.length > 1;
   const label = formatLabel(view);
@@ -712,7 +738,29 @@ function formatDeltaValue(raw: number): string {
   return '';
 }
 
+// Smith/Polar have no single-number "value" the way dB/phase/VSWR/group
+// delay do: a reflection param (S11/S22) reads as an impedance, a
+// transmission param (S21/S12) as a magnitude/phase ratio.
+function markerPolarValue(marker: Marker): string {
+  if (compareMode) return '';
+  const f = files.find((f) => f.name === activeFile);
+  if (!f) return '';
+  const pt = f.data.points.reduce((a, b) =>
+    Math.abs(b.freq - marker.freq) < Math.abs(a.freq - marker.freq) ? b : a,
+  );
+  const c = pt.params[marker.param];
+  if (!c) return '';
+  if (marker.param === 0 || marker.param === 3) {
+    const z = toImpedance(c, f.data.impedance);
+    if (!Number.isFinite(z.re) || !Number.isFinite(z.im)) return '∞';
+    const sign = z.im >= 0 ? '+' : '−';
+    return `${z.re.toFixed(1)} ${sign} j${Math.abs(z.im).toFixed(1)} Ω`;
+  }
+  return `${mag(c).toFixed(3)} ∠ ${toPhase(c).toFixed(1)}°`;
+}
+
 function markerValue(marker: Marker): string {
+  if (POLAR_LIKE_VIEWS.has(view)) return markerPolarValue(marker);
   return formatMarkerValue(markerRawValue(marker));
 }
 
@@ -752,6 +800,11 @@ function updateRailState(): void {
   limitLowerToggleBtn.disabled = !hasFile;
   memorySaveBtn.disabled = !hasFile || compareMode;
   memoryToggleBtn.disabled = !memoryTrace;
+  memoryDeltaToggleBtn.disabled = !memoryTrace || compareMode || POLAR_LIKE_VIEWS.has(view);
+  if (memoryDeltaToggleBtn.disabled && memoryDeltaVisible) {
+    memoryDeltaVisible = false;
+    memoryDeltaToggleBtn.classList.remove('active');
+  }
   memoryClearBtn.disabled = !memoryTrace;
 }
 
@@ -1070,10 +1123,19 @@ memoryToggleBtn.addEventListener('click', () => {
   renderChart();
 });
 
+memoryDeltaToggleBtn.addEventListener('click', () => {
+  if (!memoryTrace) return;
+  memoryDeltaVisible = !memoryDeltaVisible;
+  memoryDeltaToggleBtn.classList.toggle('active', memoryDeltaVisible);
+  renderChart();
+});
+
 memoryClearBtn.addEventListener('click', () => {
   memoryTrace = null;
   memoryVisible = false;
+  memoryDeltaVisible = false;
   memoryToggleBtn.classList.remove('active');
+  memoryDeltaToggleBtn.classList.remove('active');
   storage.clearMemory().catch((err) => console.error('vnaviewer: failed to clear persisted memory', err));
   updateRailState();
   renderChart();

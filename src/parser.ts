@@ -87,6 +87,16 @@ export function toVSWR(c: Complex): number {
   return m < 1 ? (1 + m) / (1 - m) : Infinity;
 }
 
+// Z = Z0 * (1+Gamma) / (1-Gamma), only meaningful for a reflection
+// coefficient (S11/S22), not a transmission parameter.
+export function toImpedance(c: Complex, z0: number): Complex {
+  const denom = (1 - c.re) ** 2 + c.im ** 2;
+  return {
+    re: (z0 * (1 - c.re ** 2 - c.im ** 2)) / denom,
+    im: (z0 * 2 * c.im) / denom,
+  };
+}
+
 function unwrapPhase(rad: number[]): number[] {
   const out = [rad[0]];
   for (let i = 1; i < rad.length; i++) {

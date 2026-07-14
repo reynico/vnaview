@@ -147,12 +147,20 @@ export function render(
   limitLower: number | null = null,
   hiddenTraces: Set<string> = new Set(),
   traceOverrides: Map<string, TraceStyle> = new Map(),
+  showMemoryDelta = false,
 ): Promise<void> {
   if (view === 'smith') {
     return renderSmith(el, entries, markers, activeMarkerId, deltaRefId, hiddenTraces, traceOverrides);
   }
   if (view === 'polar') {
     return renderPolar(el, entries, markers, activeMarkerId, deltaRefId, hiddenTraces, traceOverrides);
+  }
+  if (showMemoryDelta) {
+    const memoryEntry = entries.find((e) => e.isMemory);
+    const mainEntry = entries.find((e) => !e.isMemory);
+    if (memoryEntry && mainEntry) {
+      return renderMemoryDelta(el, mainEntry, memoryEntry, view, hiddenTraces);
+    }
   }
 
   const isHidden = (label: string, i: number) => hiddenTraces.has(`${label}#${i}`);
@@ -277,6 +285,86 @@ export function render(
       responsive: true,
       edits: { shapePosition: true },
       toImageButtonOptions: { format: 'png', filename: exportFilename(entries, view), scale: 2 },
+    },
+  ).then(() => Plotly.Plots.resize(el));
+}
+
+function nearestIndex(points: DataPoint[], freq: number): number {
+  let idx = 0;
+  let minDist = Infinity;
+  for (let k = 0; k < points.length; k++) {
+    const d = Math.abs(points[k].freq - freq);
+    if (d < minDist) {
+      minDist = d;
+      idx = k;
+    }
+  }
+  return idx;
+}
+
+// Replaces the normal absolute-value trace set with per-param (current -
+// memory) curves. Markers aren't meaningful on a delta curve (they read off
+// the absolute S-parameter), so this view has none.
+function renderMemoryDelta(
+  el: HTMLElement,
+  entry: ChartEntry,
+  memoryEntry: ChartEntry,
+  view: View,
+  hiddenTraces: Set<string>,
+): Promise<void> {
+  const { label, data } = entry;
+  const memData = memoryEntry.data;
+  const colors = singleColors();
+  const freqs = data.points.map((p) => p.freq / 1e6);
+  const traces: Plotly.Data[] = [];
+  let maxAbs = 0;
+
+  const count = Math.min(data.ports === 1 ? 1 : 4, memData.ports === 1 ? 1 : 4);
+  for (let i = 0; i < count; i++) {
+    if (view === 'vswr' && i !== 0 && i !== 3) continue;
+    if (hiddenTraces.has(`${label}#${i}`)) continue;
+
+    const curY = computeYValues(data, i, view);
+    const memY = computeYValues(memData, i, view);
+    const delta = data.points.map((p, idx) => curY[idx] - memY[nearestIndex(memData.points, p.freq)]);
+    for (const d of delta) if (Number.isFinite(d)) maxAbs = Math.max(maxAbs, Math.abs(d));
+
+    traces.push({
+      x: freqs,
+      y: delta,
+      name: `Δ ${PARAM_NAMES[i]}`,
+      type: 'scatter',
+      mode: 'lines',
+      line: { color: colors[i], width: 1.5 },
+    });
+  }
+
+  const yTitle =
+    view === 'db' ? `Δ ${t('magnitude')} (dB)`
+    : view === 'phase' ? `Δ ${t('phase')} (°)`
+    : view === 'groupdelay' ? `Δ ${t('groupDelay')} (ns)`
+    : 'Δ VSWR';
+
+  const pad = maxAbs > 0 ? maxAbs * 1.15 : 1;
+
+  return Plotly.react(
+    el,
+    traces,
+    {
+      ...baseLayout(),
+      title: {
+        text: `${label} − ${memoryEntry.label}`,
+        font: { size: 12, color: theme().muted },
+        x: 0.02,
+        xanchor: 'left' as const,
+        pad: { t: 4 },
+      },
+      xaxis: { ...axisStyle(), title: { text: `${t('frequency')} (MHz)` } },
+      yaxis: { ...axisStyle(), title: { text: yTitle }, range: [-pad, pad] },
+    },
+    {
+      responsive: true,
+      toImageButtonOptions: { format: 'png', filename: exportFilename([entry], view), scale: 2 },
     },
   ).then(() => Plotly.Plots.resize(el));
 }
