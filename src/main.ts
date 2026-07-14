@@ -72,6 +72,7 @@ let scaleState = defaultScaleState();
 let dbPerDiv = 10;
 let refLevel = 0;
 let freqRange: [number, number] | null = null;
+let xDivisions = 10;
 
 let limitUpperEnabled = false;
 let limitLowerEnabled = false;
@@ -112,6 +113,7 @@ const freqStartInput = document.getElementById('freq-start') as HTMLInputElement
 const freqStopInput = document.getElementById('freq-stop') as HTMLInputElement;
 const freqCenterInput = document.getElementById('freq-center') as HTMLInputElement;
 const freqSpanInput = document.getElementById('freq-span') as HTMLInputElement;
+const freqDivInput = document.getElementById('freq-div') as HTMLInputElement;
 const softkeyRail = document.getElementById('softkey-rail')!;
 const searchPeakBtn = document.getElementById('search-peak') as HTMLButtonElement;
 const searchMinBtn = document.getElementById('search-min') as HTMLButtonElement;
@@ -279,6 +281,8 @@ function reset(): void {
   scaleState = defaultScaleState();
   applyScaleForView();
   freqRange = null;
+  xDivisions = 10;
+  freqDivInput.value = '10';
   limitUpperEnabled = false;
   limitLowerEnabled = false;
   limitUpperToggleBtn.classList.remove('active');
@@ -384,6 +388,7 @@ function renderChart(): Promise<void> {
     hiddenTraces,
     traceOverrides,
     deltaMode,
+    xDivisions,
   );
 }
 
@@ -1147,6 +1152,13 @@ freqStartInput.addEventListener('change', applyStartStop);
 freqStopInput.addEventListener('change', applyStartStop);
 freqCenterInput.addEventListener('change', applyCenterSpan);
 freqSpanInput.addEventListener('change', applyCenterSpan);
+
+freqDivInput.addEventListener('change', () => {
+  const v = Math.round(parseFloat(freqDivInput.value));
+  xDivisions = Number.isFinite(v) && v >= 2 ? v : 10;
+  freqDivInput.value = String(xDivisions);
+  renderChart();
+});
 
 markerDeltaToggle.addEventListener('click', () => {
   if (activeMarkerId === null) return;
