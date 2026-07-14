@@ -133,21 +133,6 @@ function exportFilename(entries: ChartEntry[], view: View): string {
   return `${base}_${view}_${date}`;
 }
 
-// Used to derive an evenly-divided x-axis grid (tick0/dtick) even when the
-// range isn't pinned by the user (freqRange null -> Plotly autoranges).
-function freqExtentMHz(entries: ChartEntry[]): [number, number] | null {
-  let min = Infinity;
-  let max = -Infinity;
-  for (const e of entries) {
-    for (const p of e.data.points) {
-      const f = p.freq / 1e6;
-      if (f < min) min = f;
-      if (f > max) max = f;
-    }
-  }
-  return Number.isFinite(min) && Number.isFinite(max) ? [min, max] : null;
-}
-
 export function render(
   el: HTMLElement,
   entries: ChartEntry[],
@@ -286,8 +271,6 @@ export function render(
   const xRange: [number, number] | undefined = freqRange
     ? [freqRange[0] / 1e6, freqRange[1] / 1e6]
     : undefined;
-  const xExtent = xRange ?? freqExtentMHz(entries);
-  const dtick = xExtent && xExtent[1] > xExtent[0] ? (xExtent[1] - xExtent[0]) / xDivisions : undefined;
 
   return Plotly.react(
     el,
@@ -299,8 +282,7 @@ export function render(
         ...axisStyle(),
         title: { text: `${t('frequency')} (MHz)` },
         range: xRange,
-        tick0: xExtent?.[0],
-        dtick,
+        nticks: xDivisions,
       },
       yaxis: { ...axisStyle(), title: { text: yTitle }, range: yRange },
       shapes,
@@ -341,8 +323,6 @@ function renderMemoryDelta(
   const memData = memoryEntry.data;
   const colors = singleColors();
   const freqs = data.points.map((p) => p.freq / 1e6);
-  const xExtent = freqExtentMHz([entry]);
-  const dtick = xExtent && xExtent[1] > xExtent[0] ? (xExtent[1] - xExtent[0]) / xDivisions : undefined;
   const traces: Plotly.Data[] = [];
   let maxAbs = 0;
 
@@ -386,7 +366,7 @@ function renderMemoryDelta(
         xanchor: 'left' as const,
         pad: { t: 4 },
       },
-      xaxis: { ...axisStyle(), title: { text: `${t('frequency')} (MHz)` }, tick0: xExtent?.[0], dtick },
+      xaxis: { ...axisStyle(), title: { text: `${t('frequency')} (MHz)` }, nticks: xDivisions },
       yaxis: { ...axisStyle(), title: { text: yTitle }, range: [-pad, pad] },
     },
     {
