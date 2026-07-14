@@ -417,26 +417,77 @@ main.dropping::after {
 .trace-info {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.3rem;
   font-size: 0.8rem;
   color: var(--muted);
+}
+
+.trace-toggle {
   background: none;
   border: none;
   padding: 0;
-  font-family: inherit;
-}
-
-button.trace-info {
+  font: inherit;
+  color: inherit;
   cursor: pointer;
 }
 
-button.trace-info:hover {
+.trace-toggle:hover {
   color: var(--text);
 }
 
 .trace-info.off {
   opacity: 0.4;
+}
+
+.trace-info.off .trace-toggle {
   text-decoration: line-through;
+}
+
+.trace-color {
+  width: 0.9rem;
+  height: 0.9rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: none;
+  cursor: pointer;
+  flex-shrink: 0;
+  /* Native color swatches paint their own square swatch as inner content;
+     clip it to the rounded border so it still reads as a dot. */
+  overflow: hidden;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.trace-color::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.trace-color::-webkit-color-swatch {
+  border: none;
+  border-radius: 50%;
+}
+
+.trace-color::-moz-color-swatch {
+  border: none;
+  border-radius: 50%;
+}
+
+.trace-width {
+  width: 3.2rem;
+  padding: 0.1rem 0.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.2rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-family: inherit;
+}
+
+.trace-width:focus {
+  outline: none;
+  border-color: var(--accent);
+  color: var(--text);
 }
 
 #chart-wrap {

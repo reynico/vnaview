@@ -19,6 +19,11 @@ export interface Marker {
   param: number;
 }
 
+export interface TraceStyle {
+  color?: string;
+  width?: number;
+}
+
 export const PARAM_NAMES = ['S11', 'S21', 'S12', 'S22'];
 
 const MONO_FONT = "ui-monospace, 'SF Mono', 'Cascadia Code', 'JetBrains Mono', Consolas, monospace";
@@ -141,15 +146,17 @@ export function render(
   limitUpper: number | null = null,
   limitLower: number | null = null,
   hiddenTraces: Set<string> = new Set(),
+  traceOverrides: Map<string, TraceStyle> = new Map(),
 ): Promise<void> {
   if (view === 'smith') {
-    return renderSmith(el, entries, markers, activeMarkerId, deltaRefId, hiddenTraces);
+    return renderSmith(el, entries, markers, activeMarkerId, deltaRefId, hiddenTraces, traceOverrides);
   }
   if (view === 'polar') {
-    return renderPolar(el, entries, markers, activeMarkerId, deltaRefId, hiddenTraces);
+    return renderPolar(el, entries, markers, activeMarkerId, deltaRefId, hiddenTraces, traceOverrides);
   }
 
   const isHidden = (label: string, i: number) => hiddenTraces.has(`${label}#${i}`);
+  const getOverride = (label: string, i: number) => traceOverrides.get(`${label}#${i}`);
 
   const compare = entries.length > 1;
   const traces: Plotly.Data[] = [];
@@ -161,19 +168,23 @@ export function render(
     let paramsToPlot: number[];
 
     if (compare) {
-      // S11 solid, S21 dashed (if 2-port); memory traces are always dotted/dimmed.
+      // Memory traces are always dotted/dimmed; otherwise solid, colored by
+      // per-trace override (falls back to the file's base color).
       paramsToPlot = data.ports === 1 ? [0] : [0, 1];
       for (const i of paramsToPlot) {
         if (isHidden(label, i)) continue;
+        const ov = getOverride(label, i);
+        const traceColor = ov?.color ?? color;
+        const width = ov?.width ?? 1.5;
         const y = computeYValues(data, i, view);
-        if (!isMemory) traces.push(glowTrace(freqs, y, color, 1.5));
+        if (!isMemory) traces.push(glowTrace(freqs, y, traceColor, width));
         traces.push({
           x: freqs,
           y,
           name: `${label} · ${PARAM_NAMES[i]}`,
           type: 'scatter',
           mode: 'lines',
-          line: { color, width: 1.5, dash: isMemory ? 'dot' : i === 0 ? 'solid' : 'dash' },
+          line: { color: traceColor, width, dash: isMemory ? 'dot' : 'solid' },
           opacity: isMemory ? 0.5 : 1,
         });
       }
@@ -184,15 +195,18 @@ export function render(
         if (view === 'vswr' && i !== 0 && i !== 3) continue;
         paramsToPlot.push(i);
         if (isHidden(label, i)) continue;
+        const ov = getOverride(label, i);
+        const traceColor = ov?.color ?? colors[i];
+        const width = ov?.width ?? 1.5;
         const y = computeYValues(data, i, view);
-        traces.push(glowTrace(freqs, y, colors[i], 1.5));
+        traces.push(glowTrace(freqs, y, traceColor, width));
         traces.push({
           x: freqs,
           y,
           name: PARAM_NAMES[i],
           type: 'scatter',
           mode: 'lines',
-          line: { color: colors[i], width: 1.5 },
+          line: { color: traceColor, width },
         });
       }
     }
@@ -324,12 +338,16 @@ function renderSmith(
   activeMarkerId: number | null = null,
   deltaRefId: number | null = null,
   hiddenTraces: Set<string> = new Set(),
+  traceOverrides: Map<string, TraceStyle> = new Map(),
 ): Promise<void> {
   const traces: Plotly.Data[] = [...smithGrid()];
 
   for (const entry of entries) {
     const { label, color, data, isMemory } = entry;
     if (hiddenTraces.has(`${label}#0`)) continue;
+    const ov = traceOverrides.get(`${label}#0`);
+    const traceColor = ov?.color ?? color;
+    const width = ov?.width ?? 2;
     const markerPoints = isMemory
       ? []
       : markers.map((m, idx) => {
@@ -345,7 +363,7 @@ function renderSmith(
 
     const smithX = data.points.map((p) => p.params[0].re);
     const smithY = data.points.map((p) => p.params[0].im);
-    if (!isMemory) traces.push(glowTrace(smithX, smithY, color, 2));
+    if (!isMemory) traces.push(glowTrace(smithX, smithY, traceColor, width));
     traces.push({
       x: smithX,
       y: smithY,
@@ -353,7 +371,7 @@ function renderSmith(
       type: 'scatter',
       mode: 'lines',
       name: entries.length > 1 ? label : 'S11',
-      line: { color, width: 2, dash: isMemory ? 'dot' : 'solid' },
+      line: { color: traceColor, width, dash: isMemory ? 'dot' : 'solid' },
       opacity: isMemory ? 0.5 : 1,
     });
 
@@ -409,9 +427,11 @@ function renderPolar(
   activeMarkerId: number | null = null,
   deltaRefId: number | null = null,
   hiddenTraces: Set<string> = new Set(),
+  traceOverrides: Map<string, TraceStyle> = new Map(),
 ): Promise<void> {
   const compare = entries.length > 1;
   const isHidden = (label: string, i: number) => hiddenTraces.has(`${label}#${i}`);
+  const getOverride = (label: string, i: number) => traceOverrides.get(`${label}#${i}`);
 
   let maxR = 1;
   for (const { label, data } of entries) {
@@ -437,10 +457,12 @@ function renderPolar(
 
     for (const i of paramIdxs) {
       if (isHidden(label, i)) continue;
-      const traceColor = compare ? color : colors[i];
+      const ov = getOverride(label, i);
+      const traceColor = ov?.color ?? (compare ? color : colors[i]);
+      const width = ov?.width ?? 1.5;
       const x = data.points.map((p) => p.params[i].re);
       const y = data.points.map((p) => p.params[i].im);
-      if (!isMemory) traces.push(glowTrace(x, y, traceColor, 1.5));
+      if (!isMemory) traces.push(glowTrace(x, y, traceColor, width));
       traces.push({
         x,
         y,
@@ -448,7 +470,7 @@ function renderPolar(
         type: 'scatter',
         mode: 'lines',
         name: compare ? `${label} · ${PARAM_NAMES[i]}` : PARAM_NAMES[i],
-        line: { color: traceColor, width: 1.5, dash: isMemory ? 'dot' : compare && i === 1 ? 'dash' : 'solid' },
+        line: { color: traceColor, width, dash: isMemory ? 'dot' : 'solid' },
         opacity: isMemory ? 0.5 : 1,
       });
 

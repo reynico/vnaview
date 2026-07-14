@@ -51,6 +51,13 @@ const hiddenTraces = new Set<string>();
 function traceKey(label: string, param: number): string {
   return `${label}#${param}`;
 }
+// Per-trace color/width overrides set via the trace-info-bar pickers, keyed
+// the same way as hiddenTraces. Absent entries fall back to the theme palette.
+interface TraceStyle {
+  color?: string;
+  width?: number;
+}
+const traceOverrides = new Map<string, TraceStyle>();
 type ScaleView = 'db' | 'phase' | 'vswr' | 'groupdelay';
 const SCALE_UNITS: Record<ScaleView, string> = { db: 'dB', phase: '°', vswr: 'VSWR', groupdelay: 'ns' };
 function defaultScaleState(): Record<ScaleView, { perDiv: number; ref: number }> {
@@ -239,6 +246,9 @@ function removeFile(name: string): void {
   for (const key of hiddenTraces) {
     if (key.startsWith(`${name}#`)) hiddenTraces.delete(key);
   }
+  for (const key of Array.from(traceOverrides.keys())) {
+    if (key.startsWith(`${name}#`)) traceOverrides.delete(key);
+  }
   storage.deleteFile(name).catch((err) => console.error('vnaviewer: failed to remove persisted file', err));
   if (files.length === 0) {
     reset();
@@ -261,6 +271,7 @@ function reset(): void {
   bwLowMarkerId = null;
   bwHighMarkerId = null;
   hiddenTraces.clear();
+  traceOverrides.clear();
   scaleState = defaultScaleState();
   applyScaleForView();
   freqRange = null;
@@ -360,6 +371,7 @@ function renderChart(): Promise<void> {
     Number.isFinite(limitUpper) ? limitUpper : null,
     Number.isFinite(limitLower) ? limitLower : null,
     hiddenTraces,
+    traceOverrides,
   );
 }
 
@@ -416,19 +428,63 @@ function renderTraceInfoBar(entries: ChartEntry[]): void {
   traceInfoBar.innerHTML = '';
   if (entries.length === 0) return;
 
-  const addChip = (color: string, text: string, key: string | null = null) => {
-    const chip = document.createElement(key ? 'button' : 'span');
+  const addChip = (color: string, text: string, key: string | null = null, defaultWidth = 1.5) => {
+    const chip = document.createElement('span');
     chip.className = 'trace-info' + (key && hiddenTraces.has(key) ? ' off' : '');
-    chip.innerHTML = `<span class="dot" style="background:${color}"></span>${text}`;
-    if (key) {
-      (chip as HTMLButtonElement).type = 'button';
-      chip.title = t('traceToggleHint');
-      chip.addEventListener('click', () => {
-        if (hiddenTraces.has(key)) hiddenTraces.delete(key);
-        else hiddenTraces.add(key);
-        renderChart();
-      });
+
+    if (!key) {
+      const dot = document.createElement('span');
+      dot.className = 'dot';
+      dot.style.background = color;
+      chip.appendChild(dot);
+      chip.appendChild(document.createTextNode(text));
+      traceInfoBar.appendChild(chip);
+      return;
     }
+
+    const colorInput = document.createElement('input');
+    colorInput.type = 'color';
+    colorInput.className = 'trace-color';
+    colorInput.value = traceOverrides.get(key)?.color ?? color;
+    colorInput.title = t('traceColorHint');
+    colorInput.addEventListener('click', (e) => e.stopPropagation());
+    colorInput.addEventListener('input', () => {
+      traceOverrides.set(key, { ...traceOverrides.get(key), color: colorInput.value });
+      renderChart();
+    });
+    chip.appendChild(colorInput);
+
+    const toggleBtn = document.createElement('button');
+    toggleBtn.type = 'button';
+    toggleBtn.className = 'trace-toggle';
+    toggleBtn.textContent = text;
+    toggleBtn.title = t('traceToggleHint');
+    toggleBtn.addEventListener('click', () => {
+      if (hiddenTraces.has(key)) hiddenTraces.delete(key);
+      else hiddenTraces.add(key);
+      renderChart();
+    });
+    chip.appendChild(toggleBtn);
+
+    const widthInput = document.createElement('input');
+    widthInput.type = 'number';
+    widthInput.className = 'trace-width';
+    widthInput.step = '0.5';
+    widthInput.min = '0.5';
+    widthInput.max = '5';
+    widthInput.title = t('traceWidthHint');
+    widthInput.value = String(traceOverrides.get(key)?.width ?? defaultWidth);
+    widthInput.addEventListener('click', (e) => e.stopPropagation());
+    widthInput.addEventListener('change', () => {
+      const v = parseFloat(widthInput.value);
+      traceOverrides.set(key, {
+        ...traceOverrides.get(key),
+        width: Number.isFinite(v) && v > 0 ? v : undefined,
+      });
+      renderChart();
+    });
+    chip.appendChild(widthInput);
+
     traceInfoBar.appendChild(chip);
   };
 
@@ -440,7 +496,7 @@ function renderTraceInfoBar(entries: ChartEntry[]): void {
   for (const entry of entries) {
     if (view === 'smith') {
       const name = compare ? entry.label : 'S11';
-      addChip(entry.color, `${name} · Smith Chart`, traceKey(entry.label, 0));
+      addChip(entry.color, `${name} · Smith Chart`, traceKey(entry.label, 0), 2);
       continue;
     }
 
@@ -501,6 +557,13 @@ function renameFile(oldName: string, newInputValue: string): void {
     if (key.startsWith(`${oldName}#`)) {
       hiddenTraces.delete(key);
       hiddenTraces.add(`${newName}#${key.slice(oldName.length + 1)}`);
+    }
+  }
+  for (const key of Array.from(traceOverrides.keys())) {
+    if (key.startsWith(`${oldName}#`)) {
+      const style = traceOverrides.get(key)!;
+      traceOverrides.delete(key);
+      traceOverrides.set(`${newName}#${key.slice(oldName.length + 1)}`, style);
     }
   }
   storage.renameFile(oldName, newName, file.text).catch((err) => console.error('vnaviewer: failed to persist rename', err));

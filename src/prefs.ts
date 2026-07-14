@@ -51,6 +51,8 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     memoryShow: 'Show Memory',
     memoryClear: 'Clear Memory',
     traceToggleHint: 'Click to toggle trace on/off',
+    traceColorHint: 'Choose trace color',
+    traceWidthHint: 'Line width',
     renameHint: 'Double-click to rename',
   },
   es: {
@@ -99,6 +101,8 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     memoryShow: 'Mostrar Memoria',
     memoryClear: 'Borrar Memoria',
     traceToggleHint: 'Clic para activar/desactivar la traza',
+    traceColorHint: 'Elegir color de la traza',
+    traceWidthHint: 'Ancho de línea',
     renameHint: 'Doble clic para renombrar',
   },
 };
