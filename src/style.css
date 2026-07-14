@@ -574,7 +574,7 @@ button.trace-info:hover {
 }
 
 #marker-table tbody tr.delta-ref .marker-num {
-  color: #ff5ec2 !important;
+  color: var(--marker-delta) !important;
 }
 
 .marker-num {
