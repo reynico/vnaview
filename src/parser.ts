@@ -107,6 +107,19 @@ export function serialize(data: TouchstoneData): string {
   return lines.join('\n');
 }
 
+// S11-only Touchstone text, for exporting a partial (full:false) 2-port
+// dataset - unlike serialize(), never fabricates S12/S22. A real S2P file
+// with zeroed-out params would misrepresent a live capture as a complete
+// 2-port measurement to any tool that opens it outside this app.
+export function serializeS1P(data: TouchstoneData): string {
+  const lines = [`# Hz S RI R ${data.impedance}`];
+  for (const p of data.points) {
+    const c = p.params[0];
+    lines.push(`${p.freq} ${c.re} ${c.im}`);
+  }
+  return lines.join('\n');
+}
+
 export function mag(c: Complex): number {
   return Math.sqrt(c.re ** 2 + c.im ** 2);
 }

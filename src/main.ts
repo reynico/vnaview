@@ -1,4 +1,4 @@
-import { parse, toDB, toPhase, toVSWR, toImpedance, groupDelay, mag, paramIndices, serialize } from './parser';
+import { parse, toDB, toPhase, toVSWR, toImpedance, groupDelay, mag, paramIndices, serialize, serializeS1P } from './parser';
 import { render, PARAM_NAMES, singleColors, type View, type ChartEntry, type Marker } from './chart';
 import { findPeak, findMin, findNextPeak, findBandwidth, type BandwidthResult } from './markers';
 import { evaluateLimits, type LimitLine } from './limits';
@@ -103,6 +103,7 @@ const fileBar = document.getElementById('file-bar')!;
 const fileChips = document.getElementById('file-chips')!;
 const compareBtn = document.getElementById('compare')!;
 const exportCsvBtn = document.getElementById('export-csv')!;
+const exportTouchstoneBtn = document.getElementById('export-touchstone') as HTMLButtonElement;
 const clearBtn = document.getElementById('clear')!;
 const markerOverlay = document.getElementById('marker-overlay')!;
 const markerTableBody = document.querySelector('#marker-table tbody')!;
@@ -233,6 +234,7 @@ function applyData(name: string, data: TouchstoneData, text: string, focus = tru
   viewNav.hidden = false;
   clearBtn.hidden = false;
   exportCsvBtn.hidden = false;
+  exportTouchstoneBtn.hidden = false;
   softkeyRail.hidden = false;
 
   renderFileBar();
@@ -338,6 +340,7 @@ function reset(): void {
   clearBtn.hidden = true;
   compareBtn.hidden = true;
   exportCsvBtn.hidden = true;
+  exportTouchstoneBtn.hidden = true;
   scaleBar.hidden = true;
   freqBar.hidden = true;
   softkeyRail.hidden = true;
@@ -838,6 +841,7 @@ function updateRailState(): void {
   limitUpperToggleBtn.disabled = !hasFile;
   limitLowerToggleBtn.disabled = !hasFile;
   memorySaveBtn.disabled = !hasFile || compareMode;
+  exportTouchstoneBtn.disabled = !hasFile || compareMode;
   memoryToggleBtn.disabled = !memoryTrace;
   memoryDeltaToggleBtn.disabled = !memoryTrace || compareMode || POLAR_LIKE_VIEWS.has(view);
   if (memoryDeltaToggleBtn.disabled && memoryDeltaVisible) {
@@ -1104,6 +1108,22 @@ exportCsvBtn.addEventListener('click', () => {
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   const base = compareMode ? 'compare' : (activeFile ?? 'trace').replace(/\.[^.]+$/, '');
   downloadBlob(`${base}_${date}.csv`, buildCSV(entries), 'text/csv');
+});
+
+exportTouchstoneBtn.addEventListener('click', () => {
+  const f = files.find((f) => f.name === activeFile);
+  if (!f || compareMode) return;
+  const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const base = f.name.replace(/\.[^.]+$/, '');
+  if (f.data.full === false) {
+    // Only S11/S21 were actually measured - a real .s2p would have to
+    // fabricate S12/S22, misrepresenting a live capture as a complete
+    // 2-port measurement to whatever tool opens it next.
+    downloadBlob(`${base}_${date}.s1p`, serializeS1P(f.data), 'text/plain');
+  } else {
+    const ext = f.data.ports === 1 ? 's1p' : 's2p';
+    downloadBlob(`${base}_${date}.${ext}`, f.text, 'text/plain');
+  }
 });
 
 scaleDivInput.addEventListener('change', () => {

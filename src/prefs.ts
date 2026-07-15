@@ -8,6 +8,7 @@ const STRINGS: Record<Lang, Record<string, string>> = {
   en: {
     compare: 'Compare',
     exportCsv: 'Export CSV',
+    exportTouchstone: 'Export S1P/S2P',
     clearAllFiles: 'Clear all',
     dropLine1: 'Drop a .s1p or .s2p file',
     dropLine2: 'or click to browse',
@@ -83,6 +84,7 @@ const STRINGS: Record<Lang, Record<string, string>> = {
   es: {
     compare: 'Comparar',
     exportCsv: 'Exportar CSV',
+    exportTouchstone: 'Exportar S1P/S2P',
     clearAllFiles: 'Borrar todo',
     dropLine1: 'Suelta un archivo .s1p o .s2p',
     dropLine2: 'o haz clic para explorar',

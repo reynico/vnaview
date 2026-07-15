@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parse, toDB, toPhase, toVSWR, mag, groupDelay, paramIndices } from '../src/parser';
+import { parse, toDB, toPhase, toVSWR, mag, groupDelay, paramIndices, serializeS1P } from '../src/parser';
 import type { DataPoint, TouchstoneData } from '../src/parser';
 
 const S1P_RI = `
@@ -184,5 +184,26 @@ describe('paramIndices', () => {
   it('restricts a partial (full:false) 2-port dataset to S11/S21 in any mode', () => {
     expect(paramIndices(touchstone(2, false), false)).toEqual([0, 1]);
     expect(paramIndices(touchstone(2, false), true)).toEqual([0, 1]);
+  });
+});
+
+describe('serializeS1P', () => {
+  it('writes only S11, dropping any other measured params', () => {
+    const data: TouchstoneData = {
+      ports: 2,
+      full: false,
+      impedance: 50,
+      points: [
+        { freq: 1e6, params: [{ re: 0.1, im: 0.2 }, { re: 0.9, im: -0.1 }] },
+        { freq: 2e6, params: [{ re: -0.3, im: 0.05 }, { re: 0.8, im: 0.02 }] },
+      ],
+    };
+    const text = serializeS1P(data);
+    const parsed = parse(text, 'live.s1p');
+    expect(parsed.ports).toBe(1);
+    expect(parsed.points).toHaveLength(2);
+    expect(parsed.points[0].params[0].re).toBeCloseTo(0.1);
+    expect(parsed.points[0].params[0].im).toBeCloseTo(0.2);
+    expect(parsed.points[0].params).toHaveLength(1);
   });
 });

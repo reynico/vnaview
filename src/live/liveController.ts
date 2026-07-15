@@ -13,6 +13,7 @@ export interface LiveCallbacks {
 export class LiveController {
   private conn: SerialConnection | null = null;
   private running = false;
+  private version: string | null = null;
 
   constructor(private cbs: LiveCallbacks) {}
 
@@ -23,9 +24,9 @@ export class LiveController {
   private async attach(port: SerialPort, baudRate: number): Promise<void> {
     this.cbs.onStatus('connecting');
     const conn = await SerialConnection.open(port, baudRate, this.cbs.onLog ?? null);
-    const version = await getVersion((cmd, t) => conn.exec(cmd, t));
+    this.version = await getVersion((cmd, t) => conn.exec(cmd, t));
     this.conn = conn;
-    this.cbs.onStatus('connected', version);
+    this.cbs.onStatus('connected', this.version);
   }
 
   async connect(baudRate: number): Promise<void> {
@@ -44,6 +45,7 @@ export class LiveController {
 
   async disconnect(): Promise<void> {
     this.running = false;
+    this.version = null;
     const conn = this.conn;
     this.conn = null;
     await conn?.close();
@@ -57,7 +59,15 @@ export class LiveController {
   }
 
   stopSweeping(): void {
+    if (!this.running) return;
     this.running = false;
+    // The sweep loop's own 'connected' transition is guarded on `running`
+    // still being true (so a stop mid-tick doesn't flash back to
+    // "connected" before immediately re-showing "sweeping" on the next
+    // tick) - which means stopping is the only thing that will ever move
+    // the status off 'sweeping' once the in-flight tick finishes. Send it
+    // here instead of waiting on that tick to notice.
+    if (this.conn) this.cbs.onStatus('connected', this.version ?? undefined);
   }
 
   // Real hardware paces itself (a sweep takes real serial-transfer time), but
@@ -77,7 +87,7 @@ export class LiveController {
         const raw = await sweep((cmd, t) => conn.exec(cmd, t), startHz, stopHz, points);
         if (raw.length === 0) throw new Error('sweep returned no points');
         this.cbs.onSweep(toTouchstoneData(raw));
-        if (this.running) this.cbs.onStatus('connected');
+        if (this.running) this.cbs.onStatus('connected', this.version ?? undefined);
       } catch (err) {
         // A failed sweep doesn't tear down the connection: the port/prompt
         // sync is still fine, and closing it here would force the user to
