@@ -77,7 +77,7 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     calStepOpen: 'Connect the OPEN standard to port 1, then click Capture.',
     calStepShort: 'Connect the SHORT standard to port 1, then click Capture.',
     calStepLoad: 'Connect the LOAD (50 Ω) standard to port 1, then click Capture.',
-    calStepIsoln: 'Connect LOAD (50 Ω) terminations to both port 1 and port 2 (isolation), then click Capture (or skip if you don’t need S21 isolation correction).',
+    calStepIsoln: 'Isolation: leave the LOAD (50 Ω) on port 1, port 2 unconnected (or, with a second load, terminate port 2 too) - then click Capture. Optional; skip if you don’t need S21 isolation correction.',
     calStepThru: 'Connect port 1 to port 2 with the THRU standard, then click Capture (or skip for a 1-port-only calibration).',
   },
   es: {
@@ -152,7 +152,7 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     calStepOpen: 'Conecta el estándar OPEN al puerto 1 y hacé clic en Capturar.',
     calStepShort: 'Conecta el estándar SHORT al puerto 1 y hacé clic en Capturar.',
     calStepLoad: 'Conecta el estándar LOAD (50 Ω) al puerto 1 y hacé clic en Capturar.',
-    calStepIsoln: 'Conecta terminaciones LOAD (50 Ω) en el puerto 1 y en el puerto 2 (aislación) y hacé clic en Capturar (u omitilo si no necesitás corrección de aislación de S21).',
+    calStepIsoln: 'Aislación: dejá el LOAD (50 Ω) en el puerto 1, puerto 2 sin conectar (o, con una segunda carga, terminá también el puerto 2) y hacé clic en Capturar. Es opcional; omitilo si no necesitás corrección de aislación de S21.',
     calStepThru: 'Conecta el puerto 1 al puerto 2 con el estándar THRU y hacé clic en Capturar (o omitilo para una calibración de 1 solo puerto).',
   },
 };
