@@ -1336,8 +1336,9 @@ bwSearchBtn.addEventListener('click', () => {
     removeMarkerById(bwHighMarkerId);
     if (seedId !== null) removeMarkerById(seedId);
 
-    const low = addMarker(result.lowFreq, param);
-    const high = addMarker(result.highFreq, param);
+    const fileLabel = compareMode ? f.name : undefined;
+    const low = addMarker(result.lowFreq, param, fileLabel);
+    const high = addMarker(result.highFreq, param, fileLabel);
     bwLowMarkerId = low.id;
     bwHighMarkerId = high.id;
     deltaRefId = low.id;
