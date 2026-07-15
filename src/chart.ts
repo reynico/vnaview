@@ -17,6 +17,9 @@ export interface Marker {
   freq: number;
   /** Index into a point's params[] (0=S11, 1=S21, 2=S12, 3=S22). */
   param: number;
+  /** Which file this marker belongs to in compare mode; unused/undefined
+   *  outside compare mode, where the single active file is unambiguous. */
+  fileLabel?: string;
 }
 
 export interface TraceStyle {
@@ -222,7 +225,10 @@ export function render(
     if (isMemory) continue;
     for (const i of paramsToPlot) {
       if (isHidden(label, i)) continue;
-      const paramMarkers = markers.filter((m) => m.param === i);
+      // In compare mode a marker belongs to one file (see Marker.fileLabel) -
+      // without this, the same marker would draw a glyph on every overlaid
+      // curve that happens to share its param index.
+      const paramMarkers = markers.filter((m) => m.param === i && (!compare || m.fileLabel === label));
       if (paramMarkers.length === 0) continue;
       const yValues = computeYValues(data, i, view);
       traces.push(
@@ -435,6 +441,7 @@ function renderSmith(
   traceOverrides: Map<string, TraceStyle> = new Map(),
 ): Promise<void> {
   const traces: Plotly.Data[] = [...smithGrid()];
+  const compare = entries.length > 1;
 
   for (const entry of entries) {
     const { label, color, data, isMemory } = entry;
@@ -442,15 +449,17 @@ function renderSmith(
     const ov = traceOverrides.get(`${label}#0`);
     const traceColor = ov?.color ?? color;
     const width = ov?.width ?? 2;
+    // See the fileLabel filter in render(): a compare-mode marker belongs to
+    // one file's curve, not every overlaid one.
     const markerPoints = isMemory
       ? []
-      : markers.map((m, idx) => {
+      : markers.filter((m) => !compare || m.fileLabel === label).map((m) => {
           const pt = data.points.find((p) => p.freq >= m.freq) ?? data.points[data.points.length - 1];
           return {
             x: pt.params[0].re,
             y: pt.params[0].im,
-            num: String(idx + 1),
-            hover: `${idx + 1} · ${(m.freq / 1e6).toFixed(3)} MHz`,
+            num: String(markers.indexOf(m) + 1),
+            hover: `${markers.indexOf(m) + 1} · ${(m.freq / 1e6).toFixed(3)} MHz`,
             color: glyphColor(m.id, activeMarkerId, deltaRefId),
           };
         });
@@ -566,7 +575,7 @@ function renderPolar(
       });
 
       if (isMemory) continue;
-      const paramMarkers = markers.filter((m) => m.param === i);
+      const paramMarkers = markers.filter((m) => m.param === i && (!compare || m.fileLabel === label));
       if (paramMarkers.length === 0) continue;
       const markerPoints = paramMarkers.map((m) => {
         const pt = data.points.reduce((a, b) =>

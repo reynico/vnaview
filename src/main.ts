@@ -731,15 +731,23 @@ function renderFileBar(): void {
   }
 }
 
-function nearestSampledFreq(freqHz: number): number {
-  const points = activeEntries()[0]?.data.points;
+function nearestSampledFreq(freqHz: number, marker?: Marker): number {
+  const points = (markerFile(marker) ?? files.find((f) => f.name === activeFile))?.data.points;
   if (!points || points.length === 0) return freqHz;
   return points.reduce((a, b) => (Math.abs(b.freq - freqHz) < Math.abs(a.freq - freqHz) ? b : a)).freq;
 }
 
+// The file a marker's frequency/value should be read from: the marker's own
+// fileLabel in compare mode (each marker belongs to one overlaid curve, see
+// Marker.fileLabel), or simply the single active file otherwise.
+function markerFile(marker: Marker | undefined): LoadedFile | undefined {
+  if (!marker) return undefined;
+  if (compareMode) return files.find((f) => f.name === marker.fileLabel);
+  return files.find((f) => f.name === activeFile);
+}
+
 function markerRawValue(marker: Marker): number | null {
-  if (compareMode) return null;
-  const f = files.find((f) => f.name === activeFile);
+  const f = markerFile(marker);
   if (!f) return null;
   if (view === 'groupdelay') {
     const gd = groupDelay(f.data.points, marker.param);
@@ -787,8 +795,7 @@ function formatDeltaValue(raw: number): string {
 // delay do: a reflection param (S11/S22) reads as an impedance, a
 // transmission param (S21/S12) as a magnitude/phase ratio.
 function markerPolarValue(marker: Marker): string {
-  if (compareMode) return '';
-  const f = files.find((f) => f.name === activeFile);
+  const f = markerFile(marker);
   if (!f) return '';
   const pt = f.data.points.reduce((a, b) =>
     Math.abs(b.freq - marker.freq) < Math.abs(a.freq - marker.freq) ? b : a,
@@ -817,13 +824,13 @@ function currentValueFn(): (c: Complex) => number {
   return view === 'phase' ? toPhase : view === 'vswr' ? toVSWR : toDB;
 }
 
-function addMarker(freq: number, param: number): Marker {
+function addMarker(freq: number, param: number, fileLabel?: string): Marker {
   if (markers.length >= MAX_MARKERS) {
     const evicted = markers.shift()!;
     if (activeMarkerId === evicted.id) activeMarkerId = null;
     if (deltaRefId === evicted.id) deltaRefId = null;
   }
-  const newMarker: Marker = { id: nextMarkerId++, freq, param };
+  const newMarker: Marker = { id: nextMarkerId++, freq, param, fileLabel };
   markers.push(newMarker);
   activeMarkerId = newMarker.id;
   return newMarker;
@@ -832,7 +839,12 @@ function addMarker(freq: number, param: number): Marker {
 function updateRailState(): void {
   const hasFile = files.length > 0;
   const hasActive = activeMarkerId !== null;
-  const searchEnabled = hasFile && hasActive && !NO_SEARCH_VIEWS.has(view) && !compareMode;
+  // In compare mode a marker only has a resolvable file if it was placed on
+  // (or otherwise assigned to) one of the currently overlaid curves - the
+  // searches below operate on that specific file's data, not "the" active
+  // file, which isn't a meaningful concept while comparing.
+  const activeHasFile = !!markerFile(activeMarkerObj());
+  const searchEnabled = hasFile && hasActive && !NO_SEARCH_VIEWS.has(view) && activeHasFile;
   searchPeakBtn.disabled = !searchEnabled;
   searchMinBtn.disabled = !searchEnabled;
   searchNextLeftBtn.disabled = !searchEnabled;
@@ -840,7 +852,7 @@ function updateRailState(): void {
   markerNewCenterBtn.disabled = !hasFile;
   markerClearActiveBtn.disabled = !hasActive;
   markerClearAllBtn.disabled = markers.length === 0;
-  bwSearchBtn.disabled = !(hasFile && hasActive && view === 'db' && !compareMode);
+  bwSearchBtn.disabled = !(hasFile && hasActive && view === 'db' && activeHasFile);
   limitUpperToggleBtn.disabled = !hasFile;
   limitLowerToggleBtn.disabled = !hasFile;
   memorySaveBtn.disabled = !hasFile || compareMode;
@@ -977,12 +989,14 @@ function attachClickListener(): void {
 
     let freqHz: number;
     let param = 0;
+    let fileLabel: string | undefined;
     if (POLAR_LIKE_VIEWS.has(view)) {
       const name = pt.data.name as string;
       const idx = view === 'polar' ? PARAM_NAMES.findIndex((n) => name.includes(n)) : 0;
       param = idx >= 0 ? idx : 0;
       const ref = compareMode ? files.find((f) => name.startsWith(f.name)) ?? files[0] : files.find((f) => f.name === activeFile);
       if (!ref) return;
+      fileLabel = compareMode ? ref.name : undefined;
       const closest = ref.data.points.reduce((a, b) =>
         (b.params[param].re - pt.x) ** 2 + (b.params[param].im - pt.y) ** 2 <
         (a.params[param].re - pt.x) ** 2 + (a.params[param].im - pt.y) ** 2
@@ -995,10 +1009,14 @@ function attachClickListener(): void {
       const name = pt.data.name as string;
       const idx = PARAM_NAMES.findIndex((n) => name.includes(n));
       param = idx >= 0 ? idx : 0;
+      // Compare-mode trace names are "<file> · <param>" (see chart.ts); a
+      // single-file chart's trace is just the param name, so fileLabel stays
+      // undefined there (matching Marker.fileLabel's meaning).
+      fileLabel = compareMode ? files.find((f) => name.startsWith(f.name))?.name : undefined;
     }
 
-    if (!markers.some((m) => m.freq === freqHz && m.param === param)) {
-      addMarker(freqHz, param);
+    if (!markers.some((m) => m.freq === freqHz && m.param === param && m.fileLabel === fileLabel)) {
+      addMarker(freqHz, param, fileLabel);
       renderMarkerTable();
       renderChart();
     }
@@ -1027,7 +1045,7 @@ function attachRelayoutListener(): void {
         const x1 = ev[`shapes[${i}].x1`];
         const xMHz = x0 !== undefined && x1 !== undefined ? (x0 + x1) / 2 : (x0 ?? x1);
         if (typeof xMHz !== 'number') continue;
-        marker.freq = nearestSampledFreq(xMHz * 1e6);
+        marker.freq = nearestSampledFreq(xMHz * 1e6, marker);
       }
       renderMarkerTable();
       renderChart();
@@ -1223,7 +1241,7 @@ markerDeltaToggle.addEventListener('click', () => {
 
 searchPeakBtn.addEventListener('click', () => {
   const m = activeMarkerObj();
-  const f = files.find((f) => f.name === activeFile);
+  const f = markerFile(m);
   if (!m || !f) return;
   m.freq = findPeak(f.data.points, m.param, currentValueFn()).freq;
   renderMarkerTable();
@@ -1232,7 +1250,7 @@ searchPeakBtn.addEventListener('click', () => {
 
 searchMinBtn.addEventListener('click', () => {
   const m = activeMarkerObj();
-  const f = files.find((f) => f.name === activeFile);
+  const f = markerFile(m);
   if (!m || !f) return;
   m.freq = findMin(f.data.points, m.param, currentValueFn()).freq;
   renderMarkerTable();
@@ -1241,7 +1259,7 @@ searchMinBtn.addEventListener('click', () => {
 
 searchNextLeftBtn.addEventListener('click', () => {
   const m = activeMarkerObj();
-  const f = files.find((f) => f.name === activeFile);
+  const f = markerFile(m);
   if (!m || !f) return;
   const pt = findNextPeak(f.data.points, m.param, currentValueFn(), m.freq, 'left');
   if (pt) {
@@ -1253,7 +1271,7 @@ searchNextLeftBtn.addEventListener('click', () => {
 
 searchNextRightBtn.addEventListener('click', () => {
   const m = activeMarkerObj();
-  const f = files.find((f) => f.name === activeFile);
+  const f = markerFile(m);
   if (!m || !f) return;
   const pt = findNextPeak(f.data.points, m.param, currentValueFn(), m.freq, 'right');
   if (pt) {
@@ -1268,7 +1286,11 @@ markerNewCenterBtn.addEventListener('click', () => {
   if (entries.length === 0) return;
   const range = freqRange ?? dataExtent(entries);
   if (!range) return;
-  addMarker((range[0] + range[1]) / 2, 0);
+  // Compare mode has no single "active" file - default to the first
+  // overlaid one so the new marker still lands somewhere searchable;
+  // clicking directly on a curve (see attachClickListener) targets a
+  // specific one instead.
+  addMarker((range[0] + range[1]) / 2, 0, compareMode ? files[0]?.name : undefined);
   renderMarkerTable();
   renderChart();
 });
@@ -1296,7 +1318,7 @@ markerClearAllBtn.addEventListener('click', () => {
 
 bwSearchBtn.addEventListener('click', () => {
   const m = activeMarkerObj();
-  const f = files.find((f) => f.name === activeFile);
+  const f = markerFile(m);
   if (!m || !f || view !== 'db') return;
   const threshold = parseFloat(bwThresholdInput.value);
   if (!Number.isFinite(threshold) || threshold <= 0) return;
