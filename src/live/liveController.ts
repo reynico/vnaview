@@ -85,7 +85,12 @@ export class LiveController {
       this.cbs.onStatus('sweeping');
       try {
         const raw = await sweep((cmd, t) => conn.exec(cmd, t), startHz, stopHz, points);
-        if (raw.length === 0) throw new Error('sweep returned no points');
+        if (raw.length === 0) {
+          // The classic failure mode here is a points count the firmware's
+          // fixed sweep buffer can't hold - many NanoVNA builds cap out at
+          // 101 regardless of what the `scan` command was asked for.
+          throw new Error(`no data for ${points} points - try 101 or fewer (your firmware may cap sweep points)`);
+        }
         this.cbs.onSweep(toTouchstoneData(raw));
         if (this.running) this.cbs.onStatus('connected', this.version ?? undefined);
       } catch (err) {

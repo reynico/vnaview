@@ -161,6 +161,9 @@ const calWizardStepsEl = document.getElementById('cal-wizard-steps')!;
 const calWizardCaptureBtn = document.getElementById('cal-wizard-capture') as HTMLButtonElement;
 const calWizardSkipBtn = document.getElementById('cal-wizard-skip') as HTMLButtonElement;
 const calWizardCancelBtn = document.getElementById('cal-wizard-cancel') as HTMLButtonElement;
+const liveErrorBanner = document.getElementById('live-error-banner')!;
+const liveErrorText = document.getElementById('live-error-text')!;
+const liveErrorDismissBtn = document.getElementById('live-error-dismiss') as HTMLButtonElement;
 
 function applyI18n(): void {
   document.querySelectorAll<HTMLElement>('[data-i18n]').forEach((el) => {
@@ -1373,6 +1376,13 @@ function handleLiveStatus(status: LiveStatus, detail?: string): void {
     liveSweepToggleBtn.textContent = t('liveStartSweep');
     calWizardEl.hidden = true;
   }
+
+  if (status === 'error') {
+    liveErrorText.textContent = `${t('liveErrorPrefix')}${detail ?? ''}`;
+    liveErrorBanner.hidden = false;
+  } else {
+    liveErrorBanner.hidden = true;
+  }
 }
 
 function handleLiveSweep(data: TouchstoneData): void {
@@ -1471,6 +1481,10 @@ async function advanceCalStep(skip: boolean): Promise<void> {
     calWizardSkipBtn.disabled = false;
   }
 }
+
+liveErrorDismissBtn.addEventListener('click', () => {
+  liveErrorBanner.hidden = true;
+});
 
 liveCalOpenBtn.addEventListener('click', () => {
   calStepIndex = 0;
