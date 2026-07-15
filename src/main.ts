@@ -1,4 +1,4 @@
-import { parse, toDB, toPhase, toVSWR, toImpedance, groupDelay, mag } from './parser';
+import { parse, toDB, toPhase, toVSWR, toImpedance, groupDelay, mag, paramIndices, serialize } from './parser';
 import { render, PARAM_NAMES, singleColors, type View, type ChartEntry, type Marker } from './chart';
 import { findPeak, findMin, findNextPeak, findBandwidth, type BandwidthResult } from './markers';
 import { evaluateLimits, type LimitLine } from './limits';
@@ -6,7 +6,12 @@ import type { TouchstoneData, Complex } from './parser';
 import { getLang, setLang, t, getTheme, setTheme, type Lang } from './prefs';
 import { buildCSV, downloadBlob } from './export';
 import * as storage from './storage';
+import { LiveController, type LiveStatus } from './live/liveController';
+import { isWebSerialSupported } from './live/serialTransport';
+import type { CalStep } from './live/nanovnaProtocol';
 import './style.css';
+
+const LIVE_NAME = 'NanoVNA Live.s2p';
 
 document.documentElement.lang = getLang();
 document.documentElement.dataset.theme = getTheme();
@@ -135,6 +140,26 @@ const memorySaveBtn = document.getElementById('memory-save') as HTMLButtonElemen
 const memoryToggleBtn = document.getElementById('memory-toggle') as HTMLButtonElement;
 const memoryDeltaToggleBtn = document.getElementById('memory-delta-toggle') as HTMLButtonElement;
 const memoryClearBtn = document.getElementById('memory-clear') as HTMLButtonElement;
+const liveConnectBtn = document.getElementById('live-connect') as HTMLButtonElement;
+const liveBarEl = document.getElementById('live-bar')!;
+const liveStatusEl = document.getElementById('live-status')!;
+const liveStatusTextEl = document.getElementById('live-status-text')!;
+const liveStartInput = document.getElementById('live-start') as HTMLInputElement;
+const liveStopInput = document.getElementById('live-stop') as HTMLInputElement;
+const livePointsInput = document.getElementById('live-points') as HTMLInputElement;
+const liveBaudSelect = document.getElementById('live-baud') as HTMLSelectElement;
+const liveSweepToggleBtn = document.getElementById('live-sweep-toggle') as HTMLButtonElement;
+const liveCalOpenBtn = document.getElementById('live-cal-open') as HTMLButtonElement;
+const liveLogToggleBtn = document.getElementById('live-log-toggle') as HTMLButtonElement;
+const liveDisconnectBtn = document.getElementById('live-disconnect') as HTMLButtonElement;
+const liveLogEl = document.getElementById('live-log')!;
+const calWizardEl = document.getElementById('cal-wizard')!;
+const calWizardStepLabelEl = document.getElementById('cal-wizard-step-label')!;
+const calWizardInstructionsEl = document.getElementById('cal-wizard-instructions')!;
+const calWizardStepsEl = document.getElementById('cal-wizard-steps')!;
+const calWizardCaptureBtn = document.getElementById('cal-wizard-capture') as HTMLButtonElement;
+const calWizardSkipBtn = document.getElementById('cal-wizard-skip') as HTMLButtonElement;
+const calWizardCancelBtn = document.getElementById('cal-wizard-cancel') as HTMLButtonElement;
 
 function applyI18n(): void {
   document.querySelectorAll<HTMLElement>('[data-i18n]').forEach((el) => {
@@ -186,8 +211,11 @@ function currentLimits(): LimitLine[] {
   return limits;
 }
 
-function ingestText(name: string, text: string): void {
-  const data = parse(text, name);
+// `focus` jumps the view to this entry and drops compare mode - right for a
+// one-shot file load, wrong for a live sweep tick that would otherwise yank
+// the user back to the live trace every second even if they'd clicked away
+// to compare a reference file.
+function applyData(name: string, data: TouchstoneData, text: string, focus = true): void {
   const existing = files.findIndex((f) => f.name === name);
   if (existing >= 0) {
     files[existing].data = data;
@@ -195,8 +223,10 @@ function ingestText(name: string, text: string): void {
   } else {
     files.push({ name, data, color: nextColor(), text });
   }
-  activeFile = name;
-  compareMode = false;
+  if (focus) {
+    activeFile = name;
+    compareMode = false;
+  }
 
   dropZone.hidden = true;
   scopeArea.hidden = false;
@@ -213,6 +243,10 @@ function ingestText(name: string, text: string): void {
     attachClickListener();
     attachRelayoutListener();
   });
+}
+
+function ingestText(name: string, text: string): void {
+  applyData(name, parse(text, name), text);
 }
 
 function load(file: File): void {
@@ -238,6 +272,7 @@ function restoreFromStorage(): void {
     .then((stored) => {
       if (!stored) return;
       const data = parse(stored.text, stored.name);
+      if (stored.full === false) data.full = false;
       memoryTrace = { name: stored.name, data, text: stored.text };
       memoryVisible = true;
       memoryToggleBtn.classList.add('active');
@@ -248,6 +283,7 @@ function restoreFromStorage(): void {
 }
 
 function removeFile(name: string): void {
+  if (name === LIVE_NAME) stopLiveSweep();
   files = files.filter((f) => f.name !== name);
   for (const key of hiddenTraces) {
     if (key.startsWith(`${name}#`)) hiddenTraces.delete(key);
@@ -267,6 +303,7 @@ function removeFile(name: string): void {
 }
 
 function reset(): void {
+  stopLiveSweep();
   files = [];
   activeFile = null;
   compareMode = false;
@@ -331,8 +368,7 @@ function autoscaleOnce(): void {
   const fn = currentValueFn();
   let maxVal = -Infinity;
   for (const { label, data } of entries) {
-    const count = compareMode ? (data.ports === 1 ? 1 : 2) : data.ports === 1 ? 1 : 4;
-    for (let i = 0; i < count; i++) {
+    for (const i of paramIndices(data, compareMode)) {
       if (hiddenTraces.has(traceKey(label, i))) continue;
       // groupDelay is a derivative across points, not a per-point valueFn.
       const values = view === 'groupdelay' ? groupDelay(data.points, i).map((v) => v * 1e9) : data.points.map((p) => fn(p.params[i]));
@@ -509,9 +545,9 @@ function renderTraceInfoBar(entries: ChartEntry[], deltaMode = false): void {
     const main = entries.find((e) => !e.isMemory);
     const memEntry = entries.find((e) => e.isMemory);
     if (main && memEntry) {
-      const count = Math.min(main.data.ports === 1 ? 1 : 4, memEntry.data.ports === 1 ? 1 : 4);
+      const idxs = paramIndices(main.data, false).filter((i) => paramIndices(memEntry.data, false).includes(i));
       const colors = singleColors();
-      for (let i = 0; i < count; i++) {
+      for (const i of idxs) {
         if (view === 'vswr' && i !== 0 && i !== 3) continue;
         addChip(colors[i], `Δ ${PARAM_NAMES[i]} · vs ${memEntry.label}`);
       }
@@ -533,11 +569,10 @@ function renderTraceInfoBar(entries: ChartEntry[], deltaMode = false): void {
 
     let paramIdxs: number[];
     if (compare) {
-      paramIdxs = entry.data.ports === 1 ? [0] : [0, 1];
+      paramIdxs = paramIndices(entry.data, true);
     } else {
-      const count = entry.data.ports === 1 ? 1 : 4;
       paramIdxs = [];
-      for (let i = 0; i < count; i++) {
+      for (const i of paramIndices(entry.data, false)) {
         if (view === 'vswr' && i !== 0 && i !== 3) continue;
         paramIdxs.push(i);
       }
@@ -555,8 +590,7 @@ function renderTraceInfoBar(entries: ChartEntry[], deltaMode = false): void {
     if (limits.length > 0) {
       let anyFail = false;
       for (const entry of entries) {
-        const count = compare ? (entry.data.ports === 1 ? 1 : 2) : entry.data.ports === 1 ? 1 : 4;
-        for (let i = 0; i < count; i++) {
+        for (const i of paramIndices(entry.data, compare)) {
           if (!evaluateLimits(entry.data.points, i, toDB, limits).pass) anyFail = true;
         }
       }
@@ -1116,7 +1150,7 @@ memorySaveBtn.addEventListener('click', () => {
   memoryTrace = { name: f.name, data: f.data, text: f.text };
   memoryVisible = true;
   memoryToggleBtn.classList.add('active');
-  storage.saveMemory(f.name, f.text).catch((err) => console.error('vnaviewer: failed to persist memory trace', err));
+  storage.saveMemory(f.name, f.text, f.data.full).catch((err) => console.error('vnaviewer: failed to persist memory trace', err));
   updateRailState();
   renderChart();
 });
@@ -1289,6 +1323,144 @@ themeToggleBtn.addEventListener('click', () => {
   files.forEach((f, i) => (f.color = colors[i % colors.length]));
   renderFileBar();
   renderChart();
+});
+
+let liveSweeping = false;
+
+function stopLiveSweep(): void {
+  liveController.stopSweeping();
+  liveSweeping = false;
+  liveSweepToggleBtn.textContent = t('liveStartSweep');
+}
+
+function handleLiveStatus(status: LiveStatus, detail?: string): void {
+  liveStatusEl.className = `live-status live-${status}`;
+  liveStatusTextEl.textContent =
+    status === 'disconnected' ? t('liveDisconnected')
+    : status === 'connecting' ? t('liveConnecting')
+    : status === 'sweeping' ? t('liveSweeping')
+    : status === 'error' ? `${t('liveErrorPrefix')}${detail ?? ''}`
+    : detail || 'NanoVNA';
+
+  liveConnectBtn.hidden = status !== 'disconnected';
+  liveBarEl.hidden = status === 'disconnected';
+  const isConnected = status === 'connected' || status === 'sweeping';
+  liveSweepToggleBtn.disabled = !isConnected;
+  liveCalOpenBtn.disabled = !isConnected;
+
+  if (status === 'disconnected' || status === 'error') {
+    liveSweeping = false;
+    liveSweepToggleBtn.textContent = t('liveStartSweep');
+    calWizardEl.hidden = true;
+  }
+}
+
+function handleLiveSweep(data: TouchstoneData): void {
+  const isFirst = !files.some((f) => f.name === LIVE_NAME);
+  applyData(LIVE_NAME, data, serialize(data), isFirst);
+}
+
+function handleLiveLog(direction: 'tx' | 'rx', text: string): void {
+  const line = `${direction === 'tx' ? '>' : '<'} ${text.replace(/\n/g, '\\n')}`;
+  const lines = `${liveLogEl.textContent ?? ''}\n${line}`.split('\n').filter(Boolean);
+  liveLogEl.textContent = lines.slice(-200).join('\n');
+  liveLogEl.scrollTop = liveLogEl.scrollHeight;
+}
+
+const liveController = new LiveController({
+  onStatus: handleLiveStatus,
+  onSweep: handleLiveSweep,
+  onLog: handleLiveLog,
+});
+
+if (!isWebSerialSupported()) {
+  liveConnectBtn.disabled = true;
+  liveConnectBtn.title = t('liveUnsupported');
+}
+
+liveConnectBtn.addEventListener('click', () => {
+  liveController.connect(Number(liveBaudSelect.value)).catch((err) => {
+    if (err instanceof DOMException && err.name === 'NotFoundError') return; // user cancelled the picker
+    console.error('vnaviewer: NanoVNA connect failed', err);
+  });
+});
+
+liveDisconnectBtn.addEventListener('click', () => {
+  liveController.disconnect();
+});
+
+liveSweepToggleBtn.addEventListener('click', () => {
+  if (liveSweeping) {
+    stopLiveSweep();
+    return;
+  }
+  const start = parseFloat(liveStartInput.value) * 1e6;
+  const stop = parseFloat(liveStopInput.value) * 1e6;
+  const points = Math.round(parseFloat(livePointsInput.value));
+  if (!Number.isFinite(start) || !Number.isFinite(stop) || stop <= start || !Number.isFinite(points) || points < 11) return;
+  liveSweeping = true;
+  liveSweepToggleBtn.textContent = t('liveStopSweep');
+  liveController.startSweeping(start, stop, points);
+});
+
+liveLogToggleBtn.addEventListener('click', () => {
+  liveLogEl.hidden = !liveLogEl.hidden;
+});
+
+const CAL_STEPS: Array<{ step: CalStep; instructionKey: string }> = [
+  { step: 'open', instructionKey: 'calStepOpen' },
+  { step: 'short', instructionKey: 'calStepShort' },
+  { step: 'load', instructionKey: 'calStepLoad' },
+  { step: 'thru', instructionKey: 'calStepThru' },
+];
+let calStepIndex = 0;
+
+function renderCalWizard(): void {
+  const current = CAL_STEPS[calStepIndex];
+  calWizardStepLabelEl.textContent = `${calStepIndex + 1}/${CAL_STEPS.length}`;
+  calWizardInstructionsEl.textContent = t(current.instructionKey);
+  calWizardSkipBtn.hidden = current.step !== 'thru';
+  calWizardStepsEl.innerHTML = '';
+  CAL_STEPS.forEach((s, i) => {
+    const li = document.createElement('li');
+    li.textContent = s.step.toUpperCase();
+    li.className = i < calStepIndex ? 'done' : i === calStepIndex ? 'active' : '';
+    calWizardStepsEl.appendChild(li);
+  });
+}
+
+async function advanceCalStep(skip: boolean): Promise<void> {
+  const current = CAL_STEPS[calStepIndex];
+  calWizardCaptureBtn.disabled = true;
+  calWizardSkipBtn.disabled = true;
+  try {
+    if (!skip) await liveController.runCalStep(current.step);
+    calStepIndex++;
+    if (calStepIndex >= CAL_STEPS.length) {
+      await liveController.runCalStep('done');
+      await liveController.saveCal(0);
+      calWizardEl.hidden = true;
+    } else {
+      renderCalWizard();
+    }
+  } catch (err) {
+    console.error('vnaviewer: calibration step failed', err);
+  } finally {
+    calWizardCaptureBtn.disabled = false;
+    calWizardSkipBtn.disabled = false;
+  }
+}
+
+liveCalOpenBtn.addEventListener('click', () => {
+  calStepIndex = 0;
+  calWizardEl.hidden = false;
+  renderCalWizard();
+});
+
+calWizardCaptureBtn.addEventListener('click', () => advanceCalStep(false));
+calWizardSkipBtn.addEventListener('click', () => advanceCalStep(true));
+calWizardCancelBtn.addEventListener('click', () => {
+  calWizardEl.hidden = true;
 });
 
 applyI18n();

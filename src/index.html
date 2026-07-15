@@ -18,6 +18,7 @@
           <button data-view="smith">Smith</button>
           <button data-view="polar" data-i18n="polar">Polar</button>
         </nav>
+        <button id="live-connect" type="button" data-i18n="liveConnect">Connect NanoVNA</button>
         <button id="compare" hidden data-i18n="compare">Compare</button>
         <button id="export-csv" hidden data-i18n="exportCsv">Export CSV</button>
         <button id="clear" hidden data-i18n="clearAllFiles">Clear all</button>
@@ -36,6 +37,39 @@
           rel="noopener"
         ></a>
       </header>
+      <div id="live-bar" hidden>
+        <span id="live-status" class="live-status live-disconnected">
+          <span class="live-dot"></span>
+          <span id="live-status-text" data-i18n="liveDisconnected">Disconnected</span>
+        </span>
+        <label><span data-i18n="freqStart">START</span> <input id="live-start" type="number" step="0.001" value="1" /> MHz</label>
+        <label><span data-i18n="freqStop">STOP</span> <input id="live-stop" type="number" step="0.001" value="900" /> MHz</label>
+        <label><span data-i18n="livePoints">POINTS</span> <input id="live-points" type="number" step="1" min="11" max="401" value="101" /></label>
+        <label><span data-i18n="liveBaud">BAUD</span>
+          <select id="live-baud">
+            <option value="115200" selected>115200</option>
+            <option value="921600">921600</option>
+          </select>
+        </label>
+        <button id="live-sweep-toggle" data-i18n="liveStartSweep">Start Sweep</button>
+        <button id="live-cal-open" data-i18n="liveCalibrate">Calibrate…</button>
+        <button id="live-log-toggle" data-i18n="liveShowLog">Log</button>
+        <button id="live-disconnect" data-i18n="liveDisconnect">Disconnect</button>
+      </div>
+      <pre id="live-log" hidden></pre>
+      <div id="cal-wizard" hidden>
+        <div id="cal-wizard-box">
+          <h2 data-i18n="calWizardTitle">NanoVNA Calibration (SOL)</h2>
+          <p id="cal-wizard-step-label"></p>
+          <p id="cal-wizard-instructions"></p>
+          <ol id="cal-wizard-steps"></ol>
+          <div id="cal-wizard-actions">
+            <button id="cal-wizard-capture" data-i18n="calCapture">Capture</button>
+            <button id="cal-wizard-skip" data-i18n="calSkipThru">Skip Thru</button>
+            <button id="cal-wizard-cancel" data-i18n="calCancel">Cancel</button>
+          </div>
+        </div>
+      </div>
       <div id="file-bar" hidden>
         <div id="file-chips"></div>
       </div>

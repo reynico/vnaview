@@ -654,6 +654,157 @@ main.dropping::after {
   color: var(--danger);
 }
 
+/* Live NanoVNA bar */
+#live-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0.35rem 1rem;
+  border-bottom: 2px solid var(--border);
+  box-shadow: inset 0 -2px 4px -2px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  flex-shrink: 0;
+}
+
+#live-bar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+#live-bar input,
+#live-bar select {
+  width: 4.5rem;
+  padding: 0.15rem 0.35rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.2rem;
+  color: var(--text);
+  font-size: 0.82rem;
+}
+
+#live-bar select {
+  width: auto;
+}
+
+#live-bar input:focus,
+#live-bar select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.live-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+}
+
+.live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.live-connecting .live-dot,
+.live-sweeping .live-dot {
+  background: var(--accent);
+  animation: live-pulse 1s ease-in-out infinite;
+}
+
+.live-connected .live-dot {
+  background: var(--text);
+}
+
+.live-error .live-dot {
+  background: var(--danger);
+}
+
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+#live-log {
+  max-height: 8rem;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0.4rem 1rem;
+  background: var(--surface);
+  border-bottom: 2px solid var(--border);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--muted);
+  white-space: pre-wrap;
+  word-break: break-all;
+  flex-shrink: 0;
+}
+
+/* Calibration wizard */
+#cal-wizard {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--overlay-bg);
+  z-index: 20;
+}
+
+#cal-wizard-box {
+  width: 26rem;
+  max-width: calc(100vw - 2rem);
+  background: var(--surface);
+  border: 2px solid var(--border);
+  border-radius: 0.4rem;
+  padding: 1.2rem;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+
+#cal-wizard-box h2 {
+  font-size: 0.95rem;
+  color: var(--accent);
+  margin-bottom: 0.6rem;
+}
+
+#cal-wizard-step-label {
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+#cal-wizard-instructions {
+  font-size: 0.9rem;
+  margin: 0.4rem 0 0.8rem;
+}
+
+#cal-wizard-steps {
+  list-style: none;
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  font-size: 0.78rem;
+  color: var(--hint);
+}
+
+#cal-wizard-steps li.done {
+  color: var(--text);
+}
+
+#cal-wizard-steps li.active {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+#cal-wizard-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
 [hidden] {
   display: none !important;
 }
@@ -670,7 +821,11 @@ main.dropping::after {
   #file-bar .chip-remove,
   #softkey-rail,
   #freq-bar,
-  #bw-overlay {
+  #bw-overlay,
+  #live-connect,
+  #live-bar,
+  #live-log,
+  #cal-wizard {
     display: none !important;
   }
 }

@@ -1,5 +1,5 @@
 import Plotly from 'plotly.js-dist-min';
-import { type TouchstoneData, type DataPoint, toDB, toPhase, toVSWR, mag, groupDelay } from './parser';
+import { type TouchstoneData, type DataPoint, toDB, toPhase, toVSWR, mag, groupDelay, paramIndices } from './parser';
 import { t } from './prefs';
 
 export type View = 'db' | 'phase' | 'vswr' | 'groupdelay' | 'smith' | 'polar';
@@ -179,7 +179,7 @@ export function render(
     if (compare) {
       // Memory traces are always dotted/dimmed; otherwise solid, colored by
       // per-trace override (falls back to the file's base color).
-      paramsToPlot = data.ports === 1 ? [0] : [0, 1];
+      paramsToPlot = paramIndices(data, true);
       for (const i of paramsToPlot) {
         if (isHidden(label, i)) continue;
         const ov = getOverride(label, i);
@@ -198,9 +198,8 @@ export function render(
         });
       }
     } else {
-      const count = data.ports === 1 ? 1 : 4;
       paramsToPlot = [];
-      for (let i = 0; i < count; i++) {
+      for (const i of paramIndices(data, false)) {
         if (view === 'vswr' && i !== 0 && i !== 3) continue;
         paramsToPlot.push(i);
         if (isHidden(label, i)) continue;
@@ -326,8 +325,8 @@ function renderMemoryDelta(
   const traces: Plotly.Data[] = [];
   let maxAbs = 0;
 
-  const count = Math.min(data.ports === 1 ? 1 : 4, memData.ports === 1 ? 1 : 4);
-  for (let i = 0; i < count; i++) {
+  const idxs = paramIndices(data, false).filter((i) => paramIndices(memData, false).includes(i));
+  for (const i of idxs) {
     if (view === 'vswr' && i !== 0 && i !== 3) continue;
     if (hiddenTraces.has(`${label}#${i}`)) continue;
 
@@ -530,8 +529,7 @@ function renderPolar(
 
   let maxR = 1;
   for (const { label, data } of entries) {
-    const count = compare ? (data.ports === 1 ? 1 : 2) : data.ports === 1 ? 1 : 4;
-    for (let i = 0; i < count; i++) {
+    for (const i of paramIndices(data, compare)) {
       if (isHidden(label, i)) continue;
       for (const p of data.points) {
         const m = mag(p.params[i]);
@@ -546,9 +544,7 @@ function renderPolar(
 
   for (const entry of entries) {
     const { label, color, data, isMemory } = entry;
-    const paramIdxs = compare
-      ? data.ports === 1 ? [0] : [0, 1]
-      : Array.from({ length: data.ports === 1 ? 1 : 4 }, (_, i) => i);
+    const paramIdxs = paramIndices(data, compare);
 
     for (const i of paramIdxs) {
       if (isHidden(label, i)) continue;
@@ -657,8 +653,8 @@ function plotTitle(entries: ChartEntry[], view: View) {
     if (entries.length > 1) {
       params = `S11${entries.some((e) => e.data.ports === 2) ? ', S21' : ''} · Polar`;
     } else {
-      const { ports } = entries[0].data;
-      params = `${ports === 1 ? 'S11' : 'S11–S22'} · Polar`;
+      const { ports, full } = entries[0].data;
+      params = `${ports === 1 ? 'S11' : full === false ? 'S11, S21' : 'S11–S22'} · Polar`;
     }
   } else {
     const viewLabel =
@@ -669,9 +665,10 @@ function plotTitle(entries: ChartEntry[], view: View) {
     if (entries.length > 1) {
       params = `S11${entries.some((e) => e.data.ports === 2) ? ', S21' : ''} · ${viewLabel}`;
     } else {
-      const { ports } = entries[0].data;
+      const { ports, full } = entries[0].data;
       const measured =
         ports === 1 ? 'S11'
+        : full === false ? (view === 'vswr' ? 'S11' : 'S11, S21')
         : view === 'vswr' ? 'S11, S22'
         : 'S11–S22';
       params = `${measured} · ${viewLabel}`;

@@ -1,13 +1,12 @@
-import { toDB, toPhase } from './parser';
+import { toDB, toPhase, paramIndices } from './parser';
 import { PARAM_NAMES, type ChartEntry } from './chart';
 
 export function buildCSV(entries: ChartEntry[]): string {
   const rows: string[] = ['File,Param,Freq_Hz,Mag_dB,Phase_deg'];
 
   for (const { label, data } of entries) {
-    const count = data.ports === 1 ? 1 : 4;
     for (const point of data.points) {
-      for (let i = 0; i < count; i++) {
+      for (const i of paramIndices(data, false)) {
         const c = point.params[i];
         const db = toDB(c);
         const magDb = Number.isFinite(db) ? db.toFixed(4) : '';

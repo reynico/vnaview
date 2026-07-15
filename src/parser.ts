@@ -12,6 +12,25 @@ export interface TouchstoneData {
   ports: 1 | 2;
   points: DataPoint[];
   impedance: number;
+  /**
+   * False for a 2-port dataset where only S11/S21 were actually measured
+   * (e.g. a single-receiver NanoVNA live capture) - S12/S22 don't exist and
+   * must never be plotted/exported. Absent/true means all `ports` params
+   * are real, as in a normal Touchstone file.
+   */
+  full?: boolean;
+}
+
+/**
+ * Which params[] indices are real data for this dataset, given whether the
+ * caller is in compare mode (which already only ever shows S11/S21 for a
+ * 2-port file). Centralizes the ports/full branching that used to be
+ * duplicated at every call site.
+ */
+export function paramIndices(data: TouchstoneData, compare: boolean): number[] {
+  if (data.ports === 1) return [0];
+  if (compare || data.full === false) return [0, 1];
+  return [0, 1, 2, 3];
 }
 
 type Format = 'RI' | 'MA' | 'DB';
@@ -67,6 +86,25 @@ export function parse(content: string, filename: string): TouchstoneData {
   }
 
   return { ports, points, impedance };
+}
+
+// Inverse of parse(): always emits a well-formed 2-port RI file so it round-trips
+// through parse() for storage. S12/S22 are written as zero placeholders when
+// `full` is false - callers must keep passing the original `full`-flagged
+// TouchstoneData through the app rather than relying on the re-parsed copy,
+// since parse() itself has no notion of "full".
+export function serialize(data: TouchstoneData): string {
+  const lines = [`# Hz S RI R ${data.impedance}`];
+  for (const p of data.points) {
+    const parts = [String(p.freq)];
+    const count = data.ports === 1 ? 1 : 4;
+    for (let i = 0; i < count; i++) {
+      const c = p.params[i] ?? { re: 0, im: 0 };
+      parts.push(String(c.re), String(c.im));
+    }
+    lines.push(parts.join(' '));
+  }
+  return lines.join('\n');
 }
 
 export function mag(c: Complex): number {

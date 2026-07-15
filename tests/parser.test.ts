@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { parse, toDB, toPhase, toVSWR, mag, groupDelay } from '../src/parser';
-import type { DataPoint } from '../src/parser';
+import { parse, toDB, toPhase, toVSWR, mag, groupDelay, paramIndices } from '../src/parser';
+import type { DataPoint, TouchstoneData } from '../src/parser';
 
 const S1P_RI = `
 !Test S1P file
@@ -160,5 +160,29 @@ describe('groupDelay', () => {
     const gd = groupDelay(linearPhasePoints([1e6], 1e-9), 0);
     expect(gd).toHaveLength(1);
     expect(gd[0]).toBeNaN();
+  });
+});
+
+function touchstone(ports: 1 | 2, full?: boolean): TouchstoneData {
+  return { ports, impedance: 50, full, points: [] };
+}
+
+describe('paramIndices', () => {
+  it('returns just S11 for a 1-port dataset', () => {
+    expect(paramIndices(touchstone(1), false)).toEqual([0]);
+    expect(paramIndices(touchstone(1), true)).toEqual([0]);
+  });
+
+  it('returns all 4 params for a full 2-port dataset outside compare mode', () => {
+    expect(paramIndices(touchstone(2), false)).toEqual([0, 1, 2, 3]);
+  });
+
+  it('restricts a full 2-port dataset to S11/S21 in compare mode', () => {
+    expect(paramIndices(touchstone(2, true), true)).toEqual([0, 1]);
+  });
+
+  it('restricts a partial (full:false) 2-port dataset to S11/S21 in any mode', () => {
+    expect(paramIndices(touchstone(2, false), false)).toEqual([0, 1]);
+    expect(paramIndices(touchstone(2, false), true)).toEqual([0, 1]);
   });
 });

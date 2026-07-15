@@ -6,6 +6,8 @@ const MEMORY_STORE = 'memory';
 export interface StoredFile {
   name: string;
   text: string;
+  /** Mirrors TouchstoneData.full - only meaningful for the memory store. */
+  full?: boolean;
 }
 
 function openDB(): Promise<IDBDatabase> {
@@ -52,9 +54,9 @@ export async function loadFiles(): Promise<StoredFile[]> {
   return withStore(FILES_STORE, 'readonly', (s) => s.getAll());
 }
 
-export async function saveMemory(name: string, text: string): Promise<void> {
+export async function saveMemory(name: string, text: string, full?: boolean): Promise<void> {
   await clearMemory();
-  await withStore(MEMORY_STORE, 'readwrite', (s) => s.put({ name, text }));
+  await withStore(MEMORY_STORE, 'readwrite', (s) => s.put({ name, text, full }));
 }
 
 export async function clearMemory(): Promise<void> {
