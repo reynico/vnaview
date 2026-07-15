@@ -34,7 +34,7 @@ const MONO_FONT = "ui-monospace, 'SF Mono', 'Cascadia Code', 'JetBrains Mono', C
 // Colors are read from the CSS custom properties at render time so the
 // Plotly canvas stays in sync with style.css instead of duplicating hex
 // values that can drift out of sync with the theme.
-function theme() {
+export function theme() {
   const cs = getComputedStyle(document.documentElement);
   const read = (name: string, fallback: string) => cs.getPropertyValue(name).trim() || fallback;
   return {
@@ -136,6 +136,37 @@ function exportFilename(entries: ChartEntry[], view: View): string {
   return `${base}_${view}_${date}`;
 }
 
+/** Rasterizes the chart alone - callers compositing marker/BW overlays on
+ *  top (see main.ts's exportChartPng) need this rather than Plotly's own
+ *  download button, which only ever captures the plot itself. */
+export function toImage(el: HTMLElement, scale = 2): Promise<string> {
+  return Plotly.toImage(el, {
+    format: 'png',
+    width: el.clientWidth,
+    height: el.clientHeight,
+    scale,
+  });
+}
+
+// Plotly's default camera button only exports the plot itself - the marker
+// table and BW overlay are separate DOM elements it never sees. Swapping in
+// a custom button lets main.ts intercept the click and composite everything
+// onto one canvas instead.
+function exportModeBarButtons(onExportImage?: () => void): Partial<Plotly.Config> {
+  if (!onExportImage) return {};
+  return {
+    modeBarButtonsToRemove: ['toImage'],
+    modeBarButtonsToAdd: [
+      {
+        name: 'exportComposite',
+        title: 'Download plot as PNG (includes markers / BW box)',
+        icon: Plotly.Icons.camera,
+        click: () => onExportImage(),
+      },
+    ],
+  };
+}
+
 export function render(
   el: HTMLElement,
   entries: ChartEntry[],
@@ -152,12 +183,13 @@ export function render(
   traceOverrides: Map<string, TraceStyle> = new Map(),
   showMemoryDelta = false,
   xDivisions = 10,
+  onExportImage?: () => void,
 ): Promise<void> {
   if (view === 'smith') {
-    return renderSmith(el, entries, markers, activeMarkerId, deltaRefId, hiddenTraces, traceOverrides);
+    return renderSmith(el, entries, markers, activeMarkerId, deltaRefId, hiddenTraces, traceOverrides, onExportImage);
   }
   if (view === 'polar') {
-    return renderPolar(el, entries, markers, activeMarkerId, deltaRefId, hiddenTraces, traceOverrides);
+    return renderPolar(el, entries, markers, activeMarkerId, deltaRefId, hiddenTraces, traceOverrides, onExportImage);
   }
   if (showMemoryDelta) {
     const memoryEntry = entries.find((e) => e.isMemory);
@@ -296,6 +328,7 @@ export function render(
       responsive: true,
       edits: { shapePosition: true },
       toImageButtonOptions: { format: 'png', filename: exportFilename(entries, view), scale: 2 },
+      ...exportModeBarButtons(onExportImage),
     },
   ).then(() => Plotly.Plots.resize(el));
 }
@@ -439,6 +472,7 @@ function renderSmith(
   deltaRefId: number | null = null,
   hiddenTraces: Set<string> = new Set(),
   traceOverrides: Map<string, TraceStyle> = new Map(),
+  onExportImage?: () => void,
 ): Promise<void> {
   const traces: Plotly.Data[] = [...smithGrid()];
   const compare = entries.length > 1;
@@ -519,6 +553,7 @@ function renderSmith(
     {
       responsive: true,
       toImageButtonOptions: { format: 'png', filename: exportFilename(entries, 'smith'), scale: 2 },
+      ...exportModeBarButtons(onExportImage),
     },
   ).then(() => Plotly.Plots.resize(el));
 }
@@ -531,6 +566,7 @@ function renderPolar(
   deltaRefId: number | null = null,
   hiddenTraces: Set<string> = new Set(),
   traceOverrides: Map<string, TraceStyle> = new Map(),
+  onExportImage?: () => void,
 ): Promise<void> {
   const compare = entries.length > 1;
   const isHidden = (label: string, i: number) => hiddenTraces.has(`${label}#${i}`);
@@ -629,6 +665,7 @@ function renderPolar(
     {
       responsive: true,
       toImageButtonOptions: { format: 'png', filename: exportFilename(entries, 'polar'), scale: 2 },
+      ...exportModeBarButtons(onExportImage),
     },
   ).then(() => Plotly.Plots.resize(el));
 }

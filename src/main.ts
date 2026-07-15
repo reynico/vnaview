@@ -1,5 +1,6 @@
 import { parse, toDB, toPhase, toVSWR, toImpedance, groupDelay, mag, paramIndices, serialize } from './parser';
-import { render, PARAM_NAMES, singleColors, type View, type ChartEntry, type Marker } from './chart';
+import { render, PARAM_NAMES, singleColors, theme, toImage, type View, type ChartEntry, type Marker } from './chart';
+import { drawTextPanel } from './chartExport';
 import { findPeak, findMin, findNextPeak, findBandwidth, type BandwidthResult } from './markers';
 import { evaluateLimits, type LimitLine } from './limits';
 import type { TouchstoneData, Complex } from './parser';
@@ -431,6 +432,7 @@ function renderChart(): Promise<void> {
     traceOverrides,
     deltaMode,
     xDivisions,
+    exportChartPng,
   );
 }
 
@@ -1122,6 +1124,62 @@ compareBtn.addEventListener('click', () => {
 });
 
 clearBtn.addEventListener('click', reset);
+
+// Wired into chart.ts's custom modebar button (replaces Plotly's default
+// camera icon, which only ever rasterizes the plot itself) so the marker
+// table and BW box - separate DOM overlays Plotly never sees - end up in
+// the downloaded PNG too, matching what's actually on screen.
+async function exportChartPng(): Promise<void> {
+  const entries = activeEntries();
+  if (entries.length === 0) return;
+
+  const scale = 2;
+  let dataUrl: string;
+  try {
+    dataUrl = await toImage(chartEl, scale);
+  } catch (err) {
+    console.error('vnaviewer: failed to rasterize chart for export', err);
+    return;
+  }
+
+  const img = new Image();
+  await new Promise<void>((resolve, reject) => {
+    img.onload = () => resolve();
+    img.onerror = () => reject(new Error('failed to load rasterized chart'));
+    img.src = dataUrl;
+  });
+
+  const canvas = document.createElement('canvas');
+  canvas.width = img.width;
+  canvas.height = img.height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  ctx.drawImage(img, 0, 0);
+
+  const colors = theme();
+  const panelColors = { bg: colors.bg, border: colors.border, text: colors.marker };
+
+  if (!bwOverlay.hidden && bwOverlay.textContent) {
+    drawTextPanel(ctx, canvas.width, canvas.height, [bwOverlay.textContent], 'bottom-left', scale, panelColors);
+  }
+
+  if (!markerOverlay.hidden) {
+    const rows = Array.from(markerTableBody.querySelectorAll('tr')).map((tr) => {
+      const cells = Array.from(tr.querySelectorAll('td'))
+        .slice(0, 3)
+        .map((td) => td.textContent?.trim() ?? '');
+      return `M${cells[0] ?? ''}  ${cells[1] ?? ''}  ${cells[2] ?? ''}`;
+    });
+    if (rows.length > 0) drawTextPanel(ctx, canvas.width, canvas.height, rows, 'bottom-right', scale, panelColors);
+  }
+
+  canvas.toBlob((blob) => {
+    if (!blob) return;
+    const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const base = compareMode ? 'compare' : (activeFile ?? 'trace').replace(/\.[^.]+$/, '');
+    downloadBlob(`${base}_${view}_${date}.png`, blob, 'image/png');
+  }, 'image/png');
+}
 
 exportCsvBtn.addEventListener('click', () => {
   const entries = activeEntries();
