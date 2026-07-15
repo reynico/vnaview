@@ -1,4 +1,4 @@
-import { parse, toDB, toPhase, toVSWR, toImpedance, groupDelay, mag, paramIndices, serialize, serializeS1P } from './parser';
+import { parse, toDB, toPhase, toVSWR, toImpedance, groupDelay, mag, paramIndices, serialize } from './parser';
 import { render, PARAM_NAMES, singleColors, type View, type ChartEntry, type Marker } from './chart';
 import { findPeak, findMin, findNextPeak, findBandwidth, type BandwidthResult } from './markers';
 import { evaluateLimits, type LimitLine } from './limits';
@@ -1115,15 +1115,12 @@ exportTouchstoneBtn.addEventListener('click', () => {
   if (!f || compareMode) return;
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   const base = f.name.replace(/\.[^.]+$/, '');
-  if (f.data.full === false) {
-    // Only S11/S21 were actually measured - a real .s2p would have to
-    // fabricate S12/S22, misrepresenting a live capture as a complete
-    // 2-port measurement to whatever tool opens it next.
-    downloadBlob(`${base}_${date}.s1p`, serializeS1P(f.data), 'text/plain');
-  } else {
-    const ext = f.data.ports === 1 ? 's1p' : 's2p';
-    downloadBlob(`${base}_${date}.${ext}`, f.text, 'text/plain');
-  }
+  // f.text is already the right shape for both cases: the original bytes
+  // for a loaded file, or serialize()'s zero-filled S12/S22 for a live
+  // capture - matching what the NanoVNA itself writes when it saves a 2-port
+  // file from a single-receiver (S11/S21-only) measurement.
+  const ext = f.data.ports === 1 ? 's1p' : 's2p';
+  downloadBlob(`${base}_${date}.${ext}`, f.text, 'text/plain');
 });
 
 scaleDivInput.addEventListener('change', () => {
