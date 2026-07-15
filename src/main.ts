@@ -1344,7 +1344,10 @@ function handleLiveStatus(status: LiveStatus, detail?: string): void {
 
   liveConnectBtn.hidden = status !== 'disconnected';
   liveBarEl.hidden = status === 'disconnected';
-  const isConnected = status === 'connected' || status === 'sweeping';
+  // 'error' means a sweep/cal command failed, not that the connection was
+  // torn down - the port is still open, so sweeping/calibrating again (or
+  // just disconnecting) both stay available rather than forcing a re-pick.
+  const isConnected = status === 'connected' || status === 'sweeping' || status === 'error';
   liveSweepToggleBtn.disabled = !isConnected;
   liveCalOpenBtn.disabled = !isConnected;
 
@@ -1407,11 +1410,12 @@ liveLogToggleBtn.addEventListener('click', () => {
   liveLogEl.hidden = !liveLogEl.hidden;
 });
 
-const CAL_STEPS: Array<{ step: CalStep; instructionKey: string }> = [
+const CAL_STEPS: Array<{ step: CalStep; instructionKey: string; skippable?: boolean }> = [
   { step: 'open', instructionKey: 'calStepOpen' },
   { step: 'short', instructionKey: 'calStepShort' },
   { step: 'load', instructionKey: 'calStepLoad' },
-  { step: 'thru', instructionKey: 'calStepThru' },
+  { step: 'isoln', instructionKey: 'calStepIsoln', skippable: true },
+  { step: 'thru', instructionKey: 'calStepThru', skippable: true },
 ];
 let calStepIndex = 0;
 
@@ -1419,7 +1423,7 @@ function renderCalWizard(): void {
   const current = CAL_STEPS[calStepIndex];
   calWizardStepLabelEl.textContent = `${calStepIndex + 1}/${CAL_STEPS.length}`;
   calWizardInstructionsEl.textContent = t(current.instructionKey);
-  calWizardSkipBtn.hidden = current.step !== 'thru';
+  calWizardSkipBtn.hidden = !current.skippable;
   calWizardStepsEl.innerHTML = '';
   CAL_STEPS.forEach((s, i) => {
     const li = document.createElement('li');

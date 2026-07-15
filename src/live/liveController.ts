@@ -79,8 +79,13 @@ export class LiveController {
         this.cbs.onSweep(toTouchstoneData(raw));
         if (this.running) this.cbs.onStatus('connected');
       } catch (err) {
+        // A failed sweep doesn't tear down the connection: the port/prompt
+        // sync is still fine, and closing it here would force the user to
+        // re-pick the device (and lose the log) just to retry or inspect
+        // what went wrong.
+        console.error('vnaviewer: NanoVNA sweep failed', err);
+        this.running = false;
         this.cbs.onStatus('error', err instanceof Error ? err.message : String(err));
-        await this.disconnect();
         break;
       }
       const elapsed = Date.now() - tickStart;

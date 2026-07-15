@@ -3,6 +3,7 @@
 // when it's ready for the next command. Framing a response is just "read
 // until the tail of the buffer is the prompt".
 const PROMPT = 'ch> ';
+const POLL_MS = 15;
 
 export function isWebSerialSupported(): boolean {
   return typeof navigator !== 'undefined' && 'serial' in navigator && navigator.serial !== undefined;
@@ -22,6 +23,7 @@ export class SerialConnection {
   private buffer = '';
   private queue: Promise<unknown> = Promise.resolve();
   private closed = false;
+  private pumpError: Error | null = null;
   onLog: LogListener | null = null;
 
   private constructor(
@@ -32,6 +34,7 @@ export class SerialConnection {
     this.port = port;
     this.writer = writer;
     this.reader = reader;
+    void this.pump();
   }
 
   static async open(port: SerialPort, baudRate: number, onLog: LogListener | null = null): Promise<SerialConnection> {
@@ -41,10 +44,47 @@ export class SerialConnection {
     const reader = port.readable.getReader();
     const conn = new SerialConnection(port, writer, reader);
     conn.onLog = onLog;
-    // Clears out any partial line/prompt left over from a previous session
-    // (e.g. the on-device menu) before the first real command is sent.
-    await conn.exec('', 1500).catch(() => {});
+    await conn.drain();
     return conn;
+  }
+
+  // The only place that ever calls reader.read(). A read() that's still
+  // pending when a caller gives up waiting can't be cancelled short of
+  // tearing down the whole stream - and since reads are FIFO-queued, an
+  // abandoned one would silently steal the bytes meant for whoever reads
+  // next. Routing every read through one perpetual pump into `buffer`, with
+  // drain()/readUntilPrompt() just polling that buffer, sidesteps the
+  // problem entirely: there's only ever one outstanding read() call.
+  private async pump(): Promise<void> {
+    try {
+      for (;;) {
+        const { value, done } = await this.reader.read();
+        if (done) return;
+        if (value) this.buffer += this.decoder.decode(value, { stream: true });
+      }
+    } catch (err) {
+      this.pumpError = err instanceof Error ? err : new Error(String(err));
+    }
+  }
+
+  // Connecting can leave more than one prompt-terminated chunk already
+  // queued (e.g. a boot banner immediately followed by a second spontaneous
+  // prompt) - exec()'s framing assumes the buffer is empty before it writes
+  // a command, so stopping at the *first* found prompt here would leave a
+  // leftover prompt for the next real command to wrongly claim as its own
+  // answer, shifting every response one slot late from then on. Waiting
+  // until the port goes quiet (no bytes for `quietMs`) instead of until the
+  // first prompt is the only way to know the buffer is actually clean.
+  private async drain(maxTotalMs = 2000, quietMs = 250): Promise<void> {
+    const deadline = Date.now() + maxTotalMs;
+    let lastLength = -1;
+    while (Date.now() < deadline) {
+      if (this.buffer.length === lastLength) break; // no growth since last check -> quiet
+      lastLength = this.buffer.length;
+      await new Promise((resolve) => setTimeout(resolve, quietMs));
+    }
+    if (this.buffer) this.onLog?.('rx', `[boot noise] ${this.buffer}`);
+    this.buffer = '';
   }
 
   /** Sends a command, resolves with everything printed before the next prompt. */
@@ -57,11 +97,12 @@ export class SerialConnection {
     return result;
   }
 
-  private async readUntilPrompt(): Promise<void> {
+  private async readUntilPrompt(cmd: string, timeoutMs: number): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
     while (!this.buffer.includes(PROMPT)) {
-      const { value, done } = await this.reader.read();
-      if (done) throw new Error('serial port closed while waiting for response');
-      if (value) this.buffer += this.decoder.decode(value, { stream: true });
+      if (this.pumpError) throw this.pumpError;
+      if (Date.now() >= deadline) throw new Error(`timed out waiting for response to "${cmd}"`);
+      await new Promise((resolve) => setTimeout(resolve, POLL_MS));
     }
   }
 
@@ -69,21 +110,7 @@ export class SerialConnection {
     if (this.closed) throw new Error('serial connection closed');
     this.onLog?.('tx', cmd);
     await this.writer.write(new TextEncoder().encode(`${cmd}\r`));
-
-    // readUntilPrompt keeps running even if it loses the race below (its
-    // pending reader.read() can't be cancelled without tearing down the
-    // whole stream) - the .catch keeps that eventual settlement from
-    // surfacing as an unhandled rejection. Any bytes it still appends to
-    // `buffer` after a timeout are harmless: they just get picked up as
-    // leading context by whichever exec() call reads next.
-    const readPromise = this.readUntilPrompt();
-    readPromise.catch(() => {});
-    await Promise.race([
-      readPromise,
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error(`timed out waiting for response to "${cmd}"`)), timeoutMs),
-      ),
-    ]);
+    await this.readUntilPrompt(cmd, timeoutMs);
 
     const promptIdx = this.buffer.indexOf(PROMPT);
     let text = this.buffer.slice(0, promptIdx);
