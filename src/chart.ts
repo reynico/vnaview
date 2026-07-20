@@ -75,29 +75,13 @@ function baseLayout(): Partial<Plotly.Layout> {
   };
 }
 
-// Fakes a CRT phosphor bloom: a wider, translucent duplicate of a trace drawn
-// behind it. Avoids a CSS filter/blur on the chart container, which would
-// also blur tick labels and the marker table sitting in the same subtree.
-function glowTrace(x: number[], y: number[], color: string, width: number): Plotly.Data {
-  return {
-    x,
-    y,
-    type: 'scatter',
-    mode: 'lines',
-    line: { color, width: width * 3.5 },
-    opacity: 0.25,
-    hoverinfo: 'skip',
-    showlegend: false,
-  };
-}
-
 function axisStyle(): Partial<Plotly.LayoutAxis> {
   const t = theme();
   return {
     gridcolor: t.border,
-    gridwidth: 1.4,
+    gridwidth: 1,
     zerolinecolor: t.muted,
-    zerolinewidth: 1.4,
+    zerolinewidth: 1,
     tickfont: { color: t.muted },
     titlefont: { color: t.text },
   };
@@ -221,7 +205,6 @@ export function render(
         const traceColor = ov?.color ?? color;
         const width = ov?.width ?? 1.5;
         const y = computeYValues(data, i, view);
-        if (!isMemory) traces.push(glowTrace(freqs, y, traceColor, width));
         traces.push({
           x: freqs,
           y,
@@ -242,7 +225,6 @@ export function render(
         const traceColor = ov?.color ?? colors[i];
         const width = ov?.width ?? 1.5;
         const y = computeYValues(data, i, view);
-        traces.push(glowTrace(freqs, y, traceColor, width));
         traces.push({
           x: freqs,
           y,
@@ -500,7 +482,6 @@ function renderSmith(
 
     const smithX = data.points.map((p) => p.params[0].re);
     const smithY = data.points.map((p) => p.params[0].im);
-    if (!isMemory) traces.push(glowTrace(smithX, smithY, traceColor, width));
     traces.push({
       x: smithX,
       y: smithY,
@@ -598,7 +579,6 @@ function renderPolar(
       const width = ov?.width ?? 1.5;
       const x = data.points.map((p) => p.params[i].re);
       const y = data.points.map((p) => p.params[i].im);
-      if (!isMemory) traces.push(glowTrace(x, y, traceColor, width));
       traces.push({
         x,
         y,
