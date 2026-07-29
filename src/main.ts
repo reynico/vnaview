@@ -1511,6 +1511,7 @@ liveSweepToggleBtn.addEventListener('click', () => {
   if (!Number.isFinite(start) || !Number.isFinite(stop) || stop <= start || !Number.isFinite(points) || points < 11) return;
   liveSweeping = true;
   liveSweepToggleBtn.textContent = t('liveStopSweep');
+  freqRange = null;
   liveController.startSweeping(start, stop, points);
 });
 
