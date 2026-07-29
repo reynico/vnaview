@@ -1,7 +1,7 @@
 import { parse, toDB, toPhase, toVSWR, toImpedance, groupDelay, mag, paramIndices, serialize } from './parser';
 import { render, PARAM_NAMES, singleColors, theme, toImage, type View, type ChartEntry, type Marker } from './chart';
 import { drawTextPanel } from './chartExport';
-import { findPeak, findMin, findNextPeak, findBandwidth, type BandwidthResult } from './markers';
+import { findPeak, findMin, findNextPeak, findBandwidth, findResonance, type BandwidthResult, type ResonanceResult } from './markers';
 import { evaluateLimits, type LimitLine } from './limits';
 import type { TouchstoneData, Complex } from './parser';
 import { getLang, setLang, t, getTheme, setTheme, type Lang } from './prefs';
@@ -132,6 +132,8 @@ const markerClearAllBtn = document.getElementById('marker-clear-all') as HTMLBut
 const bwSearchBtn = document.getElementById('bw-search') as HTMLButtonElement;
 const bwThresholdInput = document.getElementById('bw-threshold') as HTMLInputElement;
 const bwOverlay = document.getElementById('bw-overlay')!;
+const resonanceSearchBtn = document.getElementById('resonance-search') as HTMLButtonElement;
+const resonanceOverlay = document.getElementById('resonance-overlay')!;
 const langToggleBtn = document.getElementById('lang-toggle') as HTMLButtonElement;
 const themeToggleBtn = document.getElementById('theme-toggle') as HTMLButtonElement;
 const limitUpperInput = document.getElementById('limit-upper') as HTMLInputElement;
@@ -180,6 +182,7 @@ function applyI18n(): void {
 function refreshDynamicText(): void {
   renderMarkerTable();
   if (!bwOverlay.hidden) renderBwOverlay(lastBwResult, lastBwThreshold);
+  if (!resonanceOverlay.hidden) renderResonanceOverlay(lastResonanceResult);
   renderChart();
 }
 
@@ -349,6 +352,7 @@ function reset(): void {
   freqBar.hidden = true;
   softkeyRail.hidden = true;
   bwOverlay.hidden = true;
+  resonanceOverlay.hidden = true;
   traceInfoBar.innerHTML = '';
   renderMarkerTable();
 }
@@ -855,6 +859,8 @@ function updateRailState(): void {
   markerClearActiveBtn.disabled = !hasActive;
   markerClearAllBtn.disabled = markers.length === 0;
   bwSearchBtn.disabled = !(hasFile && hasActive && view === 'db' && activeHasFile);
+  const activeParam = activeMarkerObj()?.param;
+  resonanceSearchBtn.disabled = !(hasFile && hasActive && activeHasFile && (activeParam === 0 || activeParam === 3));
   limitUpperToggleBtn.disabled = !hasFile;
   limitLowerToggleBtn.disabled = !hasFile;
   memorySaveBtn.disabled = !hasFile || compareMode;
@@ -892,6 +898,19 @@ function renderBwOverlay(result: BandwidthResult | null, thresholdDb: number): v
   }
   const q = Number.isFinite(result.q) ? result.q.toFixed(1) : '—';
   bwOverlay.textContent = `BW ${formatFreqSpan(result.bandwidth)} · CTR ${(result.centerFreq / 1e6).toFixed(3)} MHz · Q ${q} · -${thresholdDb}dB`;
+}
+
+let lastResonanceResult: ResonanceResult | null = null;
+
+function renderResonanceOverlay(result: ResonanceResult | null): void {
+  lastResonanceResult = result;
+  resonanceOverlay.hidden = false;
+  if (!result) {
+    resonanceOverlay.textContent = t('resonanceNotAvailable');
+    return;
+  }
+  const typeLabel = result.type === 'series' ? t('resonanceSeries') : t('resonanceParallel');
+  resonanceOverlay.textContent = `F0 ${(result.freq / 1e6).toFixed(3)} MHz · R ${result.resistance.toFixed(1)} Ω · ${typeLabel}`;
 }
 
 function removeMarkerById(id: number | null): void {
@@ -1370,6 +1389,7 @@ markerClearAllBtn.addEventListener('click', () => {
   bwLowMarkerId = null;
   bwHighMarkerId = null;
   bwOverlay.hidden = true;
+  resonanceOverlay.hidden = true;
   renderMarkerTable();
   renderChart();
 });
@@ -1404,6 +1424,19 @@ bwSearchBtn.addEventListener('click', () => {
   }
 
   renderBwOverlay(result, threshold);
+  renderMarkerTable();
+  renderChart();
+});
+
+resonanceSearchBtn.addEventListener('click', () => {
+  const m = activeMarkerObj();
+  const f = markerFile(m);
+  if (!m || !f || (m.param !== 0 && m.param !== 3)) return;
+
+  const result = findResonance(f.data.points, m.param, f.data.impedance, m.freq);
+  if (result) m.freq = result.freq;
+
+  renderResonanceOverlay(result);
   renderMarkerTable();
   renderChart();
 });

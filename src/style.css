@@ -606,6 +606,21 @@ main.dropping::after {
   z-index: 5;
 }
 
+/* Resonance readout overlay */
+#resonance-overlay {
+  position: absolute;
+  bottom: 0.5rem;
+  right: 0.5rem;
+  background: var(--overlay-bg);
+  border: 2px solid var(--border);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  border-radius: 0.25rem;
+  padding: 0.3rem 0.55rem;
+  font-size: 0.82rem;
+  color: var(--marker);
+  z-index: 5;
+}
+
 .rail-input-label {
   display: flex;
   flex-direction: column;
@@ -864,6 +879,7 @@ main.dropping::after {
   #softkey-rail,
   #freq-bar,
   #bw-overlay,
+  #resonance-overlay,
   #live-connect,
   #live-bar,
   #live-log,

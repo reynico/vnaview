@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { findPeak, findMin, findNextPeak, findBandwidth } from '../src/markers';
-import type { DataPoint, Complex } from '../src/parser';
+import { findPeak, findMin, findNextPeak, findBandwidth, findResonance } from '../src/markers';
+import { toImpedance, type DataPoint, type Complex } from '../src/parser';
 
 function pointsFromValues(values: number[]): DataPoint[] {
   return values.map((v, i) => ({
@@ -90,5 +90,64 @@ describe('findBandwidth', () => {
     const edgePeak = pointsFromValues([10, 8, 6, 4, 2, 0]);
     const result = findBandwidth(edgePeak, 0, valueFn, edgePeak[0].freq, 3);
     expect(result).toBeNull();
+  });
+});
+
+describe('findResonance', () => {
+  function gammaPoints(gammas: Array<[number, number]>): DataPoint[] {
+    return gammas.map(([re, im], i) => ({
+      freq: i * 1e6,
+      params: [{ re, im }] as Complex[],
+    }));
+  }
+
+  // With Gamma's real part held constant, Im{Z}'s sign tracks Gamma.im
+  // directly (the impedance-transform denominator is always positive), so a
+  // ramp through Gamma.im = 0 gives a clean, hand-checkable reactance crossing.
+  const risingIm = gammaPoints([
+    [0.2, -0.3],
+    [0.2, -0.1],
+    [0.2, 0.1],
+    [0.2, 0.3],
+  ]);
+  const fallingIm = gammaPoints([
+    [0.2, 0.3],
+    [0.2, 0.1],
+    [0.2, -0.1],
+    [0.2, -0.3],
+  ]);
+
+  it('interpolates the zero-crossing frequency and resistance for a series (capacitive-to-inductive) resonance', () => {
+    const result = findResonance(risingIm, 0, 50, risingIm[1].freq);
+    expect(result).not.toBeNull();
+    expect(result!.freq).toBeCloseTo(1.5e6);
+    // R at the crossing is the average of R at the two bracketing samples
+    // (both equal here since only the sign of Gamma.im differs between them).
+    const rAtBracket = toImpedance(risingIm[1].params[0], 50).re;
+    expect(result!.resistance).toBeCloseTo(rAtBracket);
+    expect(result!.type).toBe('series');
+  });
+
+  it('identifies a falling (inductive-to-capacitive) crossing as parallel resonance', () => {
+    const result = findResonance(fallingIm, 0, 50, fallingIm[1].freq);
+    expect(result).not.toBeNull();
+    expect(result!.freq).toBeCloseTo(1.5e6);
+    expect(result!.type).toBe('parallel');
+  });
+
+  it('returns the crossing nearest to the search frequency when more than one exists', () => {
+    const twoCrossings = gammaPoints([
+      [0.2, -0.3], [0.2, 0.3], // crossing near 0.5e6
+      [0.2, -0.3], [0.2, 0.3], // crossing near 2.5e6
+    ]);
+    const nearStart = findResonance(twoCrossings, 0, 50, 0);
+    expect(nearStart!.freq).toBeCloseTo(0.5e6);
+    const nearEnd = findResonance(twoCrossings, 0, 50, 3e6);
+    expect(nearEnd!.freq).toBeCloseTo(2.5e6);
+  });
+
+  it('returns null when the reactance never changes sign', () => {
+    const allInductive = gammaPoints([[0.2, 0.1], [0.2, 0.2], [0.2, 0.3]]);
+    expect(findResonance(allInductive, 0, 50, 0)).toBeNull();
   });
 });

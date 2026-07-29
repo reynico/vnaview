@@ -1,4 +1,4 @@
-import type { DataPoint, Complex } from './parser';
+import { toImpedance, type DataPoint, type Complex } from './parser';
 
 export function findPeak(
   points: DataPoint[],
@@ -132,4 +132,44 @@ export function findBandwidth(
     highFreq,
     q: bandwidth > 0 ? centerFreq / bandwidth : Infinity,
   };
+}
+
+export interface ResonanceResult {
+  freq: number;
+  resistance: number;
+  /** 'series' is a capacitive-to-inductive (-to-+) crossing, 'parallel' (anti-resonance) the reverse. */
+  type: 'series' | 'parallel';
+}
+
+/**
+ * Zero-crossing of reactance (Im{Z}) nearest `fromFreq`, for a reflection
+ * param (S11/S22) only - `param` must index a Gamma, not a transmission
+ * coefficient. Linearly interpolates both frequency and resistance between
+ * the bracketing samples. Returns null if the data has no sign change.
+ */
+export function findResonance(
+  points: DataPoint[],
+  param: number,
+  z0: number,
+  fromFreq: number,
+): ResonanceResult | null {
+  if (points.length < 2) return null;
+  const z = points.map((p) => toImpedance(p.params[param], z0));
+
+  let best: ResonanceResult | null = null;
+  let bestDist = Infinity;
+  for (let i = 1; i < points.length; i++) {
+    const xa = z[i - 1].im;
+    const xb = z[i].im;
+    if (!Number.isFinite(xa) || !Number.isFinite(xb) || (xa > 0) === (xb > 0)) continue;
+    const frac = xa / (xa - xb);
+    const freq = points[i - 1].freq + frac * (points[i].freq - points[i - 1].freq);
+    const resistance = z[i - 1].re + frac * (z[i].re - z[i - 1].re);
+    const dist = Math.abs(freq - fromFreq);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = { freq, resistance, type: xa < 0 ? 'series' : 'parallel' };
+    }
+  }
+  return best;
 }
