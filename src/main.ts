@@ -1409,8 +1409,16 @@ bwSearchBtn.addEventListener('click', () => {
   // marker from a prior search), it gets replaced by the new edge pair
   // instead of sticking around as a redundant third marker.
   const seedId = m.id !== bwLowMarkerId && m.id !== bwHighMarkerId ? m.id : null;
-  const peakPt = findPeak(f.data.points, param, toDB);
-  const result = findBandwidth(f.data.points, param, toDB, peakPt.freq, threshold);
+  // A trace has one dominant feature to measure bandwidth around, but it can
+  // be a passband peak (S21) or a resonance notch (S11) - pick whichever
+  // global extremum sits closer to where the marker actually is, so a marker
+  // dropped near a notch doesn't get measured against a peak clear across
+  // the sweep (and vice versa).
+  const maxPt = findPeak(f.data.points, param, toDB);
+  const minPt = findMin(f.data.points, param, toDB);
+  const mode: 'max' | 'min' = Math.abs(minPt.freq - m.freq) < Math.abs(maxPt.freq - m.freq) ? 'min' : 'max';
+  const peakPt = mode === 'min' ? minPt : maxPt;
+  const result = findBandwidth(f.data.points, param, toDB, peakPt.freq, threshold, mode);
 
   if (result) {
     removeMarkerById(bwLowMarkerId);

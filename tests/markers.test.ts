@@ -91,6 +91,18 @@ describe('findBandwidth', () => {
     const result = findBandwidth(edgePeak, 0, valueFn, edgePeak[0].freq, 3);
     expect(result).toBeNull();
   });
+
+  it('interpolates the +3dB band edges around a notch in min mode', () => {
+    // Mirror image of the peak fixture above (a resonance dip, not a
+    // passband) - same hand-computed crossings, just inverted.
+    const notch = pointsFromValues([10, 10, 10, 6, 2, 0, 2, 6, 10, 10, 10]);
+    const result = findBandwidth(notch, 0, valueFn, notch[5].freq, 3, 'min');
+    expect(result).not.toBeNull();
+    expect(result!.lowFreq).toBeCloseTo(3.75e6);
+    expect(result!.highFreq).toBeCloseTo(6.25e6);
+    expect(result!.centerFreq).toBeCloseTo(5e6);
+    expect(result!.bandwidth).toBeCloseTo(2.5e6);
+  });
 });
 
 describe('findResonance', () => {

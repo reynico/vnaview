@@ -74,12 +74,14 @@ export interface BandwidthResult {
 }
 
 /**
- * -N dB (default 3 dB) bandwidth around a peak: scans outward from the point
- * nearest `peakFreq` until the value drops below `peakValue - thresholdDb` on
- * each side, linearly interpolating between the bracketing samples for
- * sub-sample-step accuracy. Returns null if either side never crosses the
- * threshold within the data (peak too close to a data boundary) rather than
- * fabricating an edge value.
+ * -N dB (default 3 dB) bandwidth around a peak or notch: scans outward from
+ * the point nearest `peakFreq` until the value crosses `peakValue -
+ * thresholdDb` (mode 'max', for a passband peak) or `peakValue +
+ * thresholdDb` (mode 'min', for a resonance/rejection notch) on each side,
+ * linearly interpolating between the bracketing samples for sub-sample-step
+ * accuracy. Returns null if either side never crosses the threshold within
+ * the data (peak too close to a data boundary) rather than fabricating an
+ * edge value.
  */
 export function findBandwidth(
   points: DataPoint[],
@@ -87,6 +89,7 @@ export function findBandwidth(
   valueFn: (c: Complex) => number,
   peakFreq: number,
   thresholdDb = 3,
+  mode: 'max' | 'min' = 'max',
 ): BandwidthResult | null {
   if (points.length < 2) return null;
   const values = points.map((p) => valueFn(p.params[param]));
@@ -101,11 +104,12 @@ export function findBandwidth(
     }
   }
 
-  const target = values[peakIdx] - thresholdDb;
+  const target = mode === 'max' ? values[peakIdx] - thresholdDb : values[peakIdx] + thresholdDb;
+  const crossed = (a: number, b: number) => (mode === 'max' ? a < target && b >= target : a > target && b <= target);
 
   let lowFreq: number | null = null;
   for (let i = peakIdx; i > 0; i--) {
-    if (values[i - 1] < target && values[i] >= target) {
+    if (crossed(values[i - 1], values[i])) {
       const frac = (target - values[i - 1]) / (values[i] - values[i - 1]);
       lowFreq = points[i - 1].freq + frac * (points[i].freq - points[i - 1].freq);
       break;
@@ -114,7 +118,7 @@ export function findBandwidth(
 
   let highFreq: number | null = null;
   for (let i = peakIdx; i < points.length - 1; i++) {
-    if (values[i + 1] < target && values[i] >= target) {
+    if (crossed(values[i + 1], values[i])) {
       const frac = (values[i] - target) / (values[i] - values[i + 1]);
       highFreq = points[i].freq + frac * (points[i + 1].freq - points[i].freq);
       break;
