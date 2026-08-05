@@ -66,6 +66,7 @@ interface TraceStyle {
 const traceOverrides = new Map<string, TraceStyle>();
 type ScaleView = 'db' | 'phase' | 'vswr' | 'groupdelay';
 const SCALE_UNITS: Record<ScaleView, string> = { db: 'dB', phase: '°', vswr: 'VSWR', groupdelay: 'ns' };
+const SCALE_STEPS: Record<ScaleView, string> = { db: '0.1', phase: '1', vswr: '0.01', groupdelay: '0.1' };
 function defaultScaleState(): Record<ScaleView, { perDiv: number; ref: number }> {
   return {
     db: { perDiv: 10, ref: 0 },
@@ -364,6 +365,8 @@ function applyScaleForView(): void {
   refLevel = s.ref;
   scaleDivInput.value = String(dbPerDiv);
   scaleRefInput.value = String(refLevel);
+  scaleDivInput.step = SCALE_STEPS[view as ScaleView];
+  scaleRefInput.step = SCALE_STEPS[view as ScaleView];
   scaleDivUnitEl.textContent = SCALE_UNITS[view as ScaleView];
   scaleRefUnitEl.textContent = SCALE_UNITS[view as ScaleView];
 }
