@@ -1,8 +1,9 @@
 export type Lang = 'en' | 'es';
-export type Theme = 'dark' | 'light';
+export type Theme = 'dark' | 'light' | 'hp' | 'agilent';
 
 const LANG_KEY = 'vnaviewer:lang';
 const THEME_KEY = 'vnaviewer:theme';
+const THEMES: Theme[] = ['dark', 'light', 'hp', 'agilent'];
 
 const STRINGS: Record<Lang, Record<string, string>> = {
   en: {
@@ -44,6 +45,8 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     themeToggleLabel: 'Theme',
     themeDark: 'Dark',
     themeLight: 'Light',
+    themeHp: 'HP',
+    themeAgilent: 'Agilent',
     groupDelay: 'Group Delay',
     polar: 'Polar',
     railLimits: 'Limits',
@@ -124,6 +127,8 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     themeToggleLabel: 'Tema',
     themeDark: 'Oscuro',
     themeLight: 'Claro',
+    themeHp: 'HP',
+    themeAgilent: 'Agilent',
     groupDelay: 'Retardo de Grupo',
     polar: 'Polar',
     railLimits: 'Límites',
@@ -185,7 +190,7 @@ export function t(key: string): string {
 
 export function getTheme(): Theme {
   const stored = localStorage.getItem(THEME_KEY);
-  return stored === 'light' ? 'light' : 'dark';
+  return (THEMES as string[]).includes(stored ?? '') ? (stored as Theme) : 'dark';
 }
 
 export function setTheme(theme: Theme): void {

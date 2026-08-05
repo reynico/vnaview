@@ -24,7 +24,12 @@
         <button id="export-touchstone" hidden data-i18n="exportTouchstone">Export S1P/S2P</button>
         <button id="clear" hidden data-i18n="clearAllFiles">Clear all</button>
         <button id="lang-toggle" type="button"></button>
-        <button id="theme-toggle" type="button"></button>
+        <select id="theme-select">
+          <option value="dark" data-i18n="themeDark">Dark</option>
+          <option value="light" data-i18n="themeLight">Light</option>
+          <option value="hp" data-i18n="themeHp">HP</option>
+          <option value="agilent" data-i18n="themeAgilent">Agilent</option>
+        </select>
         <a
           id="repo-link"
           href="https://github.com/reynico/vnaview"

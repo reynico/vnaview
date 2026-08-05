@@ -4,7 +4,7 @@ import { drawTextPanel } from './chartExport';
 import { findPeak, findMin, findNextPeak, findBandwidth, findResonance, type BandwidthResult, type ResonanceResult } from './markers';
 import { evaluateLimits, type LimitLine } from './limits';
 import type { TouchstoneData, Complex } from './parser';
-import { getLang, setLang, t, getTheme, setTheme, type Lang } from './prefs';
+import { getLang, setLang, t, getTheme, setTheme, type Lang, type Theme } from './prefs';
 import { buildCSV, downloadBlob } from './export';
 import * as storage from './storage';
 import { LiveController, type LiveStatus } from './live/liveController';
@@ -135,7 +135,7 @@ const bwOverlay = document.getElementById('bw-overlay')!;
 const resonanceSearchBtn = document.getElementById('resonance-search') as HTMLButtonElement;
 const resonanceOverlay = document.getElementById('resonance-overlay')!;
 const langToggleBtn = document.getElementById('lang-toggle') as HTMLButtonElement;
-const themeToggleBtn = document.getElementById('theme-toggle') as HTMLButtonElement;
+const themeSelectEl = document.getElementById('theme-select') as HTMLSelectElement;
 const limitUpperInput = document.getElementById('limit-upper') as HTMLInputElement;
 const limitLowerInput = document.getElementById('limit-lower') as HTMLInputElement;
 const limitUpperToggleBtn = document.getElementById('limit-upper-toggle') as HTMLButtonElement;
@@ -175,8 +175,8 @@ function applyI18n(): void {
   const otherLang: Lang = getLang() === 'en' ? 'es' : 'en';
   langToggleBtn.textContent = otherLang.toUpperCase();
   langToggleBtn.title = t('langToggleLabel');
-  themeToggleBtn.textContent = getTheme() === 'dark' ? t('themeLight') : t('themeDark');
-  themeToggleBtn.title = t('themeToggleLabel');
+  themeSelectEl.value = getTheme();
+  themeSelectEl.title = t('themeToggleLabel');
 }
 
 function refreshDynamicText(): void {
@@ -1447,8 +1447,8 @@ langToggleBtn.addEventListener('click', () => {
   refreshDynamicText();
 });
 
-themeToggleBtn.addEventListener('click', () => {
-  setTheme(getTheme() === 'dark' ? 'light' : 'dark');
+themeSelectEl.addEventListener('change', () => {
+  setTheme(themeSelectEl.value as Theme);
   applyI18n();
   // Files already carry a resolved color from whichever theme was active at
   // load time; re-resolve them from the new theme's palette so traces and

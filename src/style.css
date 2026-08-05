@@ -73,6 +73,72 @@ button, input, select, textarea {
   --active-row-tint: rgba(179, 107, 0, 0.14);
 }
 
+/* HP 8753/8720-style CRT: black screen, amber accent, yellow/cyan traces. */
+:root[data-theme='hp'] {
+  color-scheme: dark;
+  --bg: #000000;
+  --surface: #111111;
+  --border: #3a3a3a;
+  --text: #e6e6e6;
+  --muted: #9a9a9a;
+  --accent: #ffb000;
+  --danger: #ff4136;
+  --marker: #ffcc00;
+  --marker-active: #ffffff;
+  --marker-delta: #ff66ff;
+  --memory: #7a8a99;
+  --trace-s11: #ffcc00;
+  --trace-s21: #00e5ff;
+  --trace-s12: #66ff66;
+  --trace-s22: #ff5fa0;
+  --file-0: #ffcc00;
+  --file-1: #00e5ff;
+  --file-2: #66ff66;
+  --file-3: #ff5fa0;
+  --file-4: #ff9900;
+  --file-5: #3399ff;
+  --file-6: #ccff33;
+  --file-7: #ff5533;
+  --hint: #555555;
+  --overlay-bg: rgba(0, 0, 0, 0.92);
+  --hover-tint: rgba(255, 176, 0, 0.05);
+  --dropping-tint: rgba(255, 176, 0, 0.08);
+  --active-row-tint: rgba(255, 176, 0, 0.16);
+}
+
+/* Agilent/Keysight ENA-style CRT: near-black blue-tinted screen, blue accent. */
+:root[data-theme='agilent'] {
+  color-scheme: dark;
+  --bg: #000814;
+  --surface: #0d1420;
+  --border: #2c3e50;
+  --text: #eef3f8;
+  --muted: #8695a3;
+  --accent: #0091d5;
+  --danger: #ff3b30;
+  --marker: #ffe135;
+  --marker-active: #ffffff;
+  --marker-delta: #ff2f92;
+  --memory: #6f8298;
+  --trace-s11: #ffe135;
+  --trace-s21: #29d6ff;
+  --trace-s12: #6bff8f;
+  --trace-s22: #ff6b81;
+  --file-0: #ffe135;
+  --file-1: #29d6ff;
+  --file-2: #6bff8f;
+  --file-3: #ff6b81;
+  --file-4: #ff9f40;
+  --file-5: #4aa3ff;
+  --file-6: #c17aff;
+  --file-7: #33d9b2;
+  --hint: #4a5a68;
+  --overlay-bg: rgba(3, 8, 14, 0.92);
+  --hover-tint: rgba(0, 145, 213, 0.06);
+  --dropping-tint: rgba(0, 145, 213, 0.1);
+  --active-row-tint: rgba(0, 145, 213, 0.16);
+}
+
 html, body {
   height: 100%;
   background: var(--bg);
@@ -137,10 +203,34 @@ button.active {
   margin-left: 0.5rem;
 }
 
-#lang-toggle,
-#theme-toggle {
+#lang-toggle {
   margin-left: 0.5rem;
   min-width: 2.1rem;
+}
+
+#theme-select {
+  margin-left: 0.5rem;
+  padding: 0.2rem 0.4rem;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 0.2rem;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-family: inherit;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+#theme-select:hover,
+#theme-select:focus {
+  border-color: var(--accent);
+  color: var(--text);
+  outline: none;
+}
+
+#theme-select option {
+  background: var(--surface);
+  color: var(--text);
 }
 
 #clear:hover {
@@ -872,7 +962,7 @@ main.dropping::after {
   #export-csv,
   #clear,
   #lang-toggle,
-  #theme-toggle,
+  #theme-select,
   #repo-link,
   #build-version,
   #file-bar .chip-remove,
