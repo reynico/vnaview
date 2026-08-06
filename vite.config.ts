@@ -18,4 +18,7 @@ export default defineConfig({
     outDir: '../dist',
     emptyOutDir: true,
   },
+  server: {
+    allowedHosts: ['projects.vm.home'],
+  },
 });
