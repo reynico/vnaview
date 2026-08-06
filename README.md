@@ -10,7 +10,7 @@ Browser-based viewer for [NanoVNA](https://nanovna.com/) `.s1p` and `.s2p` measu
 - Views: magnitude (dB), phase, VSWR, Smith chart
 - Click the trace to place frequency markers; click a marker to remove it
 - Load multiple files and switch between them, or enable **Compare** to overlay them on the same chart
-- Zoom and pan with Plotly's built-in controls
+- Zoom and pan with a hand-rolled canvas renderer: scroll to zoom, drag to select a range, double-click to reset
 
 ## Development
 

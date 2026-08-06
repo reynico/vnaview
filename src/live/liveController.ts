@@ -73,7 +73,7 @@ export class LiveController {
   // Real hardware paces itself (a sweep takes real serial-transfer time), but
   // nothing stops a very fast response - a small/point-count sweep, or a
   // future firmware - from completing quicker than the browser can paint a
-  // Plotly re-render. Without a floor here that starves the main thread of
+  // chart re-render. Without a floor here that starves the main thread of
   // any chance to handle input, since each tick queues another render before
   // the previous one's had a chance to reach the screen.
   private static readonly MIN_SWEEP_INTERVAL_MS = 100;

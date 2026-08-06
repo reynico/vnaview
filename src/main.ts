@@ -1,5 +1,5 @@
 import { parse, toDB, toPhase, toVSWR, toImpedance, groupDelay, mag, paramIndices, serialize } from './parser';
-import { render, PARAM_NAMES, singleColors, theme, toImage, type View, type ChartEntry, type Marker } from './chart';
+import { ChartCanvas, PARAM_NAMES, singleColors, theme, clampFreqRangeHz, type View, type ChartEntry, type Marker } from './chart';
 import { drawTextPanel } from './chartExport';
 import { findPeak, findMin, findNextPeak, findBandwidth, findResonance, type BandwidthResult, type ResonanceResult } from './markers';
 import { evaluateLimits, type LimitLine } from './limits';
@@ -99,13 +99,15 @@ const mainEl = document.querySelector('main')!;
 const dropZone = document.getElementById('drop-zone')!;
 const scopeArea = document.getElementById('scope-area')!;
 const traceInfoBar = document.getElementById('trace-info-bar')!;
-const chartEl = document.getElementById('chart')!;
+const chartEl = document.getElementById('chart') as HTMLCanvasElement;
+const chartWrapEl = document.getElementById('chart-wrap')!;
 const viewNav = document.getElementById('views')!;
 const fileBar = document.getElementById('file-bar')!;
 const fileChips = document.getElementById('file-chips')!;
 const compareBtn = document.getElementById('compare')!;
 const exportCsvBtn = document.getElementById('export-csv')!;
 const exportTouchstoneBtn = document.getElementById('export-touchstone') as HTMLButtonElement;
+const exportPngBtn = document.getElementById('export-png') as HTMLButtonElement;
 const clearBtn = document.getElementById('clear')!;
 const markerOverlay = document.getElementById('marker-overlay')!;
 const markerTableBody = document.querySelector('#marker-table tbody')!;
@@ -122,6 +124,9 @@ const freqStopInput = document.getElementById('freq-stop') as HTMLInputElement;
 const freqCenterInput = document.getElementById('freq-center') as HTMLInputElement;
 const freqSpanInput = document.getElementById('freq-span') as HTMLInputElement;
 const freqDivInput = document.getElementById('freq-div') as HTMLInputElement;
+const zoomOutBtn = document.getElementById('zoom-out') as HTMLButtonElement;
+const zoomInBtn = document.getElementById('zoom-in') as HTMLButtonElement;
+const zoomResetBtn = document.getElementById('zoom-reset') as HTMLButtonElement;
 const softkeyRail = document.getElementById('softkey-rail')!;
 const searchPeakBtn = document.getElementById('search-peak') as HTMLButtonElement;
 const searchMinBtn = document.getElementById('search-min') as HTMLButtonElement;
@@ -168,6 +173,12 @@ const calWizardCancelBtn = document.getElementById('cal-wizard-cancel') as HTMLB
 const liveErrorBanner = document.getElementById('live-error-banner')!;
 const liveErrorText = document.getElementById('live-error-text')!;
 const liveErrorDismissBtn = document.getElementById('live-error-dismiss') as HTMLButtonElement;
+
+const chartCanvas = new ChartCanvas(chartEl, chartWrapEl, {
+  onMarkerAdd: handleChartMarkerAdd,
+  onMarkerDrag: handleChartMarkerDrag,
+  onZoomChange: handleChartZoomChange,
+});
 
 function applyI18n(): void {
   document.querySelectorAll<HTMLElement>('[data-i18n]').forEach((el) => {
@@ -243,16 +254,14 @@ function applyData(name: string, data: TouchstoneData, text: string, focus = tru
   clearBtn.hidden = false;
   exportCsvBtn.hidden = false;
   exportTouchstoneBtn.hidden = false;
+  exportPngBtn.hidden = false;
   softkeyRail.hidden = false;
 
   renderFileBar();
   updateScaleBarVisibility();
   applyScaleForView();
   renderMarkerTable();
-  renderChart().then(() => {
-    attachClickListener();
-    attachRelayoutListener();
-  });
+  renderChart();
 }
 
 function ingestText(name: string, text: string): void {
@@ -349,6 +358,7 @@ function reset(): void {
   compareBtn.hidden = true;
   exportCsvBtn.hidden = true;
   exportTouchstoneBtn.hidden = true;
+  exportPngBtn.hidden = true;
   scaleBar.hidden = true;
   freqBar.hidden = true;
   softkeyRail.hidden = true;
@@ -415,16 +425,15 @@ function showingMemoryDelta(): boolean {
   return memoryDeltaVisible && memoryTrace !== null && !compareMode && !POLAR_LIKE_VIEWS.has(view);
 }
 
-function renderChart(): Promise<void> {
+function renderChart(): void {
   const entries = activeEntries();
-  if (entries.length === 0) return Promise.resolve();
+  if (entries.length === 0) return;
   const deltaMode = showingMemoryDelta();
   renderTraceInfoBar(entries, deltaMode);
   renderFreqBar(entries);
   const limitUpper = view === 'db' && limitUpperEnabled ? parseFloat(limitUpperInput.value) : NaN;
   const limitLower = view === 'db' && limitLowerEnabled ? parseFloat(limitLowerInput.value) : NaN;
-  return render(
-    chartEl,
+  chartCanvas.render(
     entries,
     view,
     markers,
@@ -439,7 +448,6 @@ function renderChart(): Promise<void> {
     traceOverrides,
     deltaMode,
     xDivisions,
-    exportChartPng,
   );
 }
 
@@ -984,110 +992,25 @@ function renderMarkerTable(): void {
   });
 }
 
-let clickListenerAttached = false;
-
-function attachClickListener(): void {
-  if (clickListenerAttached) return;
-  clickListenerAttached = true;
-
-  (chartEl as any).on('plotly_click', (ev: any) => {
-    const candidates = (ev.points ?? []).filter((p: any) =>
-      ['S11', 'S21', 'S12', 'S22'].some((n) => (p.data.name as string)?.includes(n)),
-    );
-    if (candidates.length === 0) return;
-
-    // hovermode 'x unified' returns one point per visible trace at the clicked x,
-    // not necessarily ordered by proximity to the cursor — pick whichever candidate
-    // is actually closest to the click in data space so markers land on the curve
-    // the user visually clicked, not just the first trace Plotly happens to list.
-    let pt = candidates[0];
-    if (!POLAR_LIKE_VIEWS.has(view) && candidates.length > 1 && ev.event) {
-      const layout = (chartEl as any)._fullLayout;
-      const bb = chartEl.getBoundingClientRect();
-      const pixelY = ev.event.clientY - bb.top - layout.margin.t;
-      const clickDataY = layout.yaxis.p2d(pixelY);
-      pt = candidates.reduce((a: any, b: any) =>
-        Math.abs(b.y - clickDataY) < Math.abs(a.y - clickDataY) ? b : a,
-      );
-    }
-
-    let freqHz: number;
-    let param = 0;
-    let fileLabel: string | undefined;
-    if (POLAR_LIKE_VIEWS.has(view)) {
-      const name = pt.data.name as string;
-      const idx = view === 'polar' ? PARAM_NAMES.findIndex((n) => name.includes(n)) : 0;
-      param = idx >= 0 ? idx : 0;
-      const ref = compareMode ? files.find((f) => name.startsWith(f.name)) ?? files[0] : files.find((f) => f.name === activeFile);
-      if (!ref) return;
-      fileLabel = compareMode ? ref.name : undefined;
-      const closest = ref.data.points.reduce((a, b) =>
-        (b.params[param].re - pt.x) ** 2 + (b.params[param].im - pt.y) ** 2 <
-        (a.params[param].re - pt.x) ** 2 + (a.params[param].im - pt.y) ** 2
-          ? b
-          : a,
-      );
-      freqHz = closest.freq;
-    } else {
-      freqHz = (pt.x as number) * 1e6;
-      const name = pt.data.name as string;
-      const idx = PARAM_NAMES.findIndex((n) => name.includes(n));
-      param = idx >= 0 ? idx : 0;
-      // Compare-mode trace names are "<file> · <param>" (see chart.ts); a
-      // single-file chart's trace is just the param name, so fileLabel stays
-      // undefined there (matching Marker.fileLabel's meaning).
-      fileLabel = compareMode ? files.find((f) => name.startsWith(f.name))?.name : undefined;
-    }
-
-    if (!markers.some((m) => m.freq === freqHz && m.param === param && m.fileLabel === fileLabel)) {
-      addMarker(freqHz, param, fileLabel);
-      renderMarkerTable();
-      renderChart();
-    }
-  });
+function handleChartMarkerAdd(freqHz: number, param: number, fileLabel?: string): void {
+  if (markers.some((m) => m.freq === freqHz && m.param === param && m.fileLabel === fileLabel)) return;
+  addMarker(freqHz, param, fileLabel);
+  renderMarkerTable();
+  renderChart();
 }
 
-let relayoutListenerAttached = false;
+function handleChartMarkerDrag(markerId: number, rawFreqHz: number): void {
+  const marker = markers.find((m) => m.id === markerId);
+  if (!marker) return;
+  marker.freq = nearestSampledFreq(rawFreqHz, marker);
+  renderMarkerTable();
+  renderChart();
+}
 
-function attachRelayoutListener(): void {
-  if (relayoutListenerAttached) return;
-  relayoutListenerAttached = true;
-
-  (chartEl as any).on('plotly_relayout', (ev: any) => {
-    if (POLAR_LIKE_VIEWS.has(view)) return;
-
-    const draggedShapes = new Set<number>();
-    for (const key of Object.keys(ev)) {
-      const match = key.match(/^shapes\[(\d+)\]\.x[01]$/);
-      if (match) draggedShapes.add(Number(match[1]));
-    }
-    if (draggedShapes.size > 0) {
-      for (const i of draggedShapes) {
-        const marker = markers[i];
-        if (!marker) continue;
-        const x0 = ev[`shapes[${i}].x0`];
-        const x1 = ev[`shapes[${i}].x1`];
-        const xMHz = x0 !== undefined && x1 !== undefined ? (x0 + x1) / 2 : (x0 ?? x1);
-        if (typeof xMHz !== 'number') continue;
-        marker.freq = nearestSampledFreq(xMHz * 1e6, marker);
-      }
-      renderMarkerTable();
-      renderChart();
-      return;
-    }
-
-    if (ev['xaxis.autorange']) {
-      freqRange = null;
-      renderFreqBar(activeEntries());
-      return;
-    }
-    const x0 = ev['xaxis.range[0]'];
-    const x1 = ev['xaxis.range[1]'];
-    if (typeof x0 === 'number' && typeof x1 === 'number') {
-      freqRange = [x0 * 1e6, x1 * 1e6];
-      renderFreqBar(activeEntries());
-    }
-  });
+function handleChartZoomChange(range: [number, number] | null): void {
+  freqRange = range;
+  renderFreqBar(activeEntries());
+  renderChart();
 }
 
 // Drop on entire main area (works whether drop zone or chart is visible)
@@ -1147,36 +1070,17 @@ compareBtn.addEventListener('click', () => {
 
 clearBtn.addEventListener('click', reset);
 
-// Wired into chart.ts's custom modebar button (replaces Plotly's default
-// camera icon, which only ever rasterizes the plot itself) so the marker
-// table and BW box - separate DOM overlays Plotly never sees - end up in
-// the downloaded PNG too, matching what's actually on screen.
-async function exportChartPng(): Promise<void> {
+// Wired into the toolbar's Export PNG button. Composites the marker table
+// and BW box - separate DOM overlays the chart canvas never draws - onto the
+// rasterized chart so the download matches what's actually on screen.
+function exportChartPng(): void {
   const entries = activeEntries();
   if (entries.length === 0) return;
 
   const scale = 2;
-  let dataUrl: string;
-  try {
-    dataUrl = await toImage(chartEl, scale);
-  } catch (err) {
-    console.error('vnaviewer: failed to rasterize chart for export', err);
-    return;
-  }
-
-  const img = new Image();
-  await new Promise<void>((resolve, reject) => {
-    img.onload = () => resolve();
-    img.onerror = () => reject(new Error('failed to load rasterized chart'));
-    img.src = dataUrl;
-  });
-
-  const canvas = document.createElement('canvas');
-  canvas.width = img.width;
-  canvas.height = img.height;
+  const canvas = chartCanvas.exportPng(scale);
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
-  ctx.drawImage(img, 0, 0);
 
   const colors = theme();
   const panelColors = { bg: colors.bg, border: colors.border, text: colors.marker };
@@ -1210,6 +1114,8 @@ exportCsvBtn.addEventListener('click', () => {
   const base = compareMode ? 'compare' : (activeFile ?? 'trace').replace(/\.[^.]+$/, '');
   downloadBlob(`${base}_${date}.csv`, buildCSV(entries), 'text/csv');
 });
+
+exportPngBtn.addEventListener('click', exportChartPng);
 
 exportTouchstoneBtn.addEventListener('click', () => {
   const f = files.find((f) => f.name === activeFile);
@@ -1312,6 +1218,24 @@ freqDivInput.addEventListener('change', () => {
   renderChart();
 });
 
+function zoomByFactor(factor: number): void {
+  const entries = activeEntries();
+  const extent = dataExtent(entries);
+  if (!extent) return;
+  const [curMin, curMax] = freqRange ?? extent;
+  const center = (curMin + curMax) / 2;
+  const span = (curMax - curMin) * factor;
+  freqRange = clampFreqRangeHz(center - span / 2, center + span / 2, extent);
+  renderChart();
+}
+
+zoomInBtn.addEventListener('click', () => zoomByFactor(0.6));
+zoomOutBtn.addEventListener('click', () => zoomByFactor(1 / 0.6));
+zoomResetBtn.addEventListener('click', () => {
+  freqRange = null;
+  renderChart();
+});
+
 markerDeltaToggle.addEventListener('click', () => {
   if (activeMarkerId === null) return;
   deltaRefId = deltaRefId === activeMarkerId ? null : activeMarkerId;
@@ -1368,7 +1292,7 @@ markerNewCenterBtn.addEventListener('click', () => {
   if (!range) return;
   // Compare mode has no single "active" file - default to the first
   // overlaid one so the new marker still lands somewhere searchable;
-  // clicking directly on a curve (see attachClickListener) targets a
+  // clicking directly on a curve (see handleChartMarkerAdd) targets a
   // specific one instead.
   addMarker((range[0] + range[1]) / 2, 0, compareMode ? files[0]?.name : undefined);
   renderMarkerTable();

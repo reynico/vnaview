@@ -1,4 +1,3 @@
-import Plotly from 'plotly.js-dist-min';
 import { type TouchstoneData, type DataPoint, toDB, toPhase, toVSWR, mag, groupDelay, paramIndices } from './parser';
 import { t } from './prefs';
 
@@ -27,13 +26,20 @@ export interface TraceStyle {
   width?: number;
 }
 
+export interface ChartCallbacks {
+  onMarkerAdd: (freqHz: number, param: number, fileLabel?: string) => void;
+  onMarkerDrag: (markerId: number, rawFreqHz: number) => void;
+  /** null means autorange (reset zoom). */
+  onZoomChange: (range: [number, number] | null) => void;
+}
+
 export const PARAM_NAMES = ['S11', 'S21', 'S12', 'S22'];
 
 const MONO_FONT = "ui-monospace, 'SF Mono', 'Cascadia Code', 'JetBrains Mono', Consolas, monospace";
 
 // Colors are read from the CSS custom properties at render time so the
-// Plotly canvas stays in sync with style.css instead of duplicating hex
-// values that can drift out of sync with the theme.
+// canvas stays in sync with style.css instead of duplicating hex values
+// that can drift out of sync with the theme.
 export function theme() {
   const cs = getComputedStyle(document.documentElement);
   const read = (name: string, fallback: string) => cs.getPropertyValue(name).trim() || fallback;
@@ -63,31 +69,7 @@ export function singleColors(): string[] {
   return theme().singleColors;
 }
 
-function baseLayout(): Partial<Plotly.Layout> {
-  const t = theme();
-  return {
-    paper_bgcolor: t.bg,
-    plot_bgcolor: t.bg,
-    font: { color: t.text, size: 12, family: MONO_FONT },
-    margin: { t: 36, r: 16, b: 52, l: 68 },
-    showlegend: false,
-    hovermode: 'x unified',
-  };
-}
-
-function axisStyle(): Partial<Plotly.LayoutAxis> {
-  const t = theme();
-  return {
-    gridcolor: t.border,
-    gridwidth: 1,
-    zerolinecolor: t.muted,
-    zerolinewidth: 1,
-    tickfont: { color: t.muted },
-    titlefont: { color: t.text },
-  };
-}
-
-function computeYRange(view: View, perDiv: number, ref: number): [number, number] | undefined {
+function computeYRange(view: View, perDiv: number, ref: number): [number, number] {
   switch (view) {
     case 'db':
       return [ref - perDiv * 8, ref + perDiv * 2];
@@ -98,7 +80,7 @@ function computeYRange(view: View, perDiv: number, ref: number): [number, number
     case 'groupdelay':
       return [ref - perDiv * 5, ref + perDiv * 5];
     default:
-      return undefined;
+      return [ref - perDiv * 5, ref + perDiv * 5];
   }
 }
 
@@ -114,205 +96,49 @@ function computeYValues(data: TouchstoneData, param: number, view: View): number
   return view === 'vswr' ? raw.map((v) => Math.round(v * 100) / 100) : raw;
 }
 
-function exportFilename(entries: ChartEntry[], view: View): string {
-  const base = entries.length > 1 ? 'compare' : entries[0]?.label.replace(/\.[^.]+$/, '') ?? 'trace';
-  const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  return `${base}_${view}_${date}`;
-}
-
-/** Rasterizes the chart alone - callers compositing marker/BW overlays on
- *  top (see main.ts's exportChartPng) need this rather than Plotly's own
- *  download button, which only ever captures the plot itself. */
-export function toImage(el: HTMLElement, scale = 2): Promise<string> {
-  return Plotly.toImage(el, {
-    format: 'png',
-    width: el.clientWidth,
-    height: el.clientHeight,
-    scale,
-  });
-}
-
-// Plotly's default camera button only exports the plot itself - the marker
-// table and BW overlay are separate DOM elements it never sees. Swapping in
-// a custom button lets main.ts intercept the click and composite everything
-// onto one canvas instead.
-function exportModeBarButtons(onExportImage?: () => void): Partial<Plotly.Config> {
-  if (!onExportImage) return {};
-  return {
-    modeBarButtonsToRemove: ['toImage'],
-    modeBarButtonsToAdd: [
-      {
-        name: 'exportComposite',
-        title: 'Download plot as PNG (includes markers / BW box)',
-        icon: Plotly.Icons.camera,
-        click: () => onExportImage(),
-      },
-    ],
-  };
-}
-
-export function render(
-  el: HTMLElement,
-  entries: ChartEntry[],
-  view: View,
-  markers: Marker[],
-  dbPerDiv: number,
-  refLevel: number,
-  freqRange: [number, number] | null = null,
-  activeMarkerId: number | null = null,
-  deltaRefId: number | null = null,
-  limitUpper: number | null = null,
-  limitLower: number | null = null,
-  hiddenTraces: Set<string> = new Set(),
-  traceOverrides: Map<string, TraceStyle> = new Map(),
-  showMemoryDelta = false,
-  xDivisions = 10,
-  onExportImage?: () => void,
-): Promise<void> {
-  if (view === 'smith') {
-    return renderSmith(el, entries, markers, activeMarkerId, deltaRefId, hiddenTraces, traceOverrides, onExportImage);
-  }
-  if (view === 'polar') {
-    return renderPolar(el, entries, markers, activeMarkerId, deltaRefId, hiddenTraces, traceOverrides, onExportImage);
-  }
-  if (showMemoryDelta) {
-    const memoryEntry = entries.find((e) => e.isMemory);
-    const mainEntry = entries.find((e) => !e.isMemory);
-    if (memoryEntry && mainEntry) {
-      return renderMemoryDelta(el, mainEntry, memoryEntry, view, hiddenTraces, xDivisions);
-    }
-  }
-
-  const isHidden = (label: string, i: number) => hiddenTraces.has(`${label}#${i}`);
-  const getOverride = (label: string, i: number) => traceOverrides.get(`${label}#${i}`);
-
-  const compare = entries.length > 1;
-  const traces: Plotly.Data[] = [];
-  const colors = singleColors();
-
-  for (const entry of entries) {
-    const { label, color, data, isMemory } = entry;
-    const freqs = data.points.map((p) => p.freq / 1e6);
-    let paramsToPlot: number[];
-
-    if (compare) {
-      // Memory traces are always dotted/dimmed; otherwise solid, colored by
-      // per-trace override (falls back to the file's base color).
-      paramsToPlot = paramIndices(data, true);
-      for (const i of paramsToPlot) {
-        if (isHidden(label, i)) continue;
-        const ov = getOverride(label, i);
-        const traceColor = ov?.color ?? color;
-        const width = ov?.width ?? 1.5;
-        const y = computeYValues(data, i, view);
-        traces.push({
-          x: freqs,
-          y,
-          name: `${label} · ${PARAM_NAMES[i]}`,
-          type: 'scatter',
-          mode: 'lines',
-          line: { color: traceColor, width, dash: isMemory ? 'dot' : 'solid' },
-          opacity: isMemory ? 0.5 : 1,
-        });
-      }
-    } else {
-      paramsToPlot = [];
-      for (const i of paramIndices(data, false)) {
-        if (view === 'vswr' && i !== 0 && i !== 3) continue;
-        paramsToPlot.push(i);
-        if (isHidden(label, i)) continue;
-        const ov = getOverride(label, i);
-        const traceColor = ov?.color ?? colors[i];
-        const width = ov?.width ?? 1.5;
-        const y = computeYValues(data, i, view);
-        traces.push({
-          x: freqs,
-          y,
-          name: PARAM_NAMES[i],
-          type: 'scatter',
-          mode: 'lines',
-          line: { color: traceColor, width },
-        });
-      }
-    }
-
-    if (isMemory) continue;
-    for (const i of paramsToPlot) {
-      if (isHidden(label, i)) continue;
-      // In compare mode a marker belongs to one file (see Marker.fileLabel) -
-      // without this, the same marker would draw a glyph on every overlaid
-      // curve that happens to share its param index.
-      const paramMarkers = markers.filter((m) => m.param === i && (!compare || m.fileLabel === label));
-      if (paramMarkers.length === 0) continue;
-      const yValues = computeYValues(data, i, view);
-      traces.push(
-        markerGlyphTrace(paramMarkers, markers, data.points, yValues, activeMarkerId, deltaRefId),
-      );
-    }
-  }
-
-  const yTitle =
-    view === 'db' ? `${t('magnitude')} (dB)`
+function yAxisTitle(view: View): string {
+  return view === 'db' ? `${t('magnitude')} (dB)`
     : view === 'phase' ? `${t('phase')} (°)`
     : view === 'groupdelay' ? `${t('groupDelay')} (ns)`
     : 'VSWR';
+}
 
-  // editable so the user can drag a marker's line to reposition it (snapped
-  // to the nearest sampled frequency on drop, see attachRelayoutListener).
-  const shapes: Array<Partial<Plotly.Shape> & { editable?: boolean }> = markers.map((m) => ({
-    type: 'line',
-    x0: m.freq / 1e6,
-    x1: m.freq / 1e6,
-    y0: 0,
-    y1: 1,
-    yref: 'paper' as const,
-    line: { color: theme().marker, width: 1, dash: 'dot' },
-    editable: true,
-  }));
+function plotTitle(entries: ChartEntry[], view: View | 'smith' | 'polar'): string {
+  const files = entries.map((e) => e.label).join(', ');
 
-  if (view === 'db') {
-    for (const limitValue of [limitUpper, limitLower]) {
-      if (limitValue === null) continue;
-      shapes.push({
-        type: 'line',
-        x0: 0,
-        x1: 1,
-        xref: 'paper' as const,
-        y0: limitValue,
-        y1: limitValue,
-        line: { color: theme().danger, width: 1.5, dash: 'dash' },
-        editable: false,
-      });
+  let params: string;
+  if (view === 'smith') {
+    params = 'S11 · Smith Chart';
+  } else if (view === 'polar') {
+    if (entries.length > 1) {
+      params = `S11${entries.some((e) => e.data.ports === 2) ? ', S21' : ''} · Polar`;
+    } else {
+      const { ports, full } = entries[0].data;
+      params = `${ports === 1 ? 'S11' : full === false ? 'S11, S21' : 'S11–S22'} · Polar`;
+    }
+  } else {
+    const viewLabel = yAxisTitle(view);
+    if (entries.length > 1) {
+      params = `S11${entries.some((e) => e.data.ports === 2) ? ', S21' : ''} · ${viewLabel}`;
+    } else {
+      const { ports, full } = entries[0].data;
+      const measured =
+        ports === 1 ? 'S11'
+        : full === false ? (view === 'vswr' ? 'S11' : 'S11, S21')
+        : view === 'vswr' ? 'S11, S22'
+        : 'S11–S22';
+      params = `${measured} · ${viewLabel}`;
     }
   }
 
-  const yRange = computeYRange(view, dbPerDiv, refLevel);
-  const xRange: [number, number] | undefined = freqRange
-    ? [freqRange[0] / 1e6, freqRange[1] / 1e6]
-    : undefined;
+  return `${files} · ${params}`;
+}
 
-  return Plotly.react(
-    el,
-    traces,
-    {
-      ...baseLayout(),
-      title: plotTitle(entries, view),
-      xaxis: {
-        ...axisStyle(),
-        title: { text: `${t('frequency')} (MHz)` },
-        range: xRange,
-        nticks: xDivisions,
-      },
-      yaxis: { ...axisStyle(), title: { text: yTitle }, range: yRange },
-      shapes,
-    },
-    {
-      responsive: true,
-      edits: { shapePosition: true },
-      toImageButtonOptions: { format: 'png', filename: exportFilename(entries, view), scale: 2 },
-      ...exportModeBarButtons(onExportImage),
-    },
-  ).then(() => Plotly.Plots.resize(el));
+function glyphColor(markerId: number, activeMarkerId: number | null, deltaRefId: number | null): string {
+  const th = theme();
+  if (markerId === deltaRefId) return th.markerDelta;
+  if (markerId === activeMarkerId) return th.markerActive;
+  return th.marker;
 }
 
 function nearestIndex(points: DataPoint[], freq: number): number {
@@ -328,424 +154,1052 @@ function nearestIndex(points: DataPoint[], freq: number): number {
   return idx;
 }
 
-// Replaces the normal absolute-value trace set with per-param (current -
-// memory) curves. Markers aren't meaningful on a delta curve (they read off
-// the absolute S-parameter), so this view has none.
-function renderMemoryDelta(
-  el: HTMLElement,
-  entry: ChartEntry,
-  memoryEntry: ChartEntry,
-  view: View,
-  hiddenTraces: Set<string>,
-  xDivisions = 10,
-): Promise<void> {
-  const { label, data } = entry;
-  const memData = memoryEntry.data;
-  const colors = singleColors();
-  const freqs = data.points.map((p) => p.freq / 1e6);
-  const traces: Plotly.Data[] = [];
-  let maxAbs = 0;
+function nearestArrIndex(values: number[], v: number): number {
+  let idx = 0;
+  let minDist = Infinity;
+  for (let k = 0; k < values.length; k++) {
+    const d = Math.abs(values[k] - v);
+    if (d < minDist) {
+      minDist = d;
+      idx = k;
+    }
+  }
+  return idx;
+}
 
-  const idxs = paramIndices(data, false).filter((i) => paramIndices(memData, false).includes(i));
-  for (const i of idxs) {
-    if (view === 'vswr' && i !== 0 && i !== 3) continue;
-    if (hiddenTraces.has(`${label}#${i}`)) continue;
+function dataExtentOf(entries: ChartEntry[]): [number, number] | null {
+  let min = Infinity;
+  let max = -Infinity;
+  for (const e of entries) {
+    for (const p of e.data.points) {
+      if (p.freq < min) min = p.freq;
+      if (p.freq > max) max = p.freq;
+    }
+  }
+  return Number.isFinite(min) && Number.isFinite(max) ? [min, max] : null;
+}
 
-    const curY = computeYValues(data, i, view);
-    const memY = computeYValues(memData, i, view);
-    const delta = data.points.map((p, idx) => curY[idx] - memY[nearestIndex(memData.points, p.freq)]);
-    for (const d of delta) if (Number.isFinite(d)) maxAbs = Math.max(maxAbs, Math.abs(d));
+// Shared by wheel-zoom, the zoom in/out/reset buttons, and drag-select: keeps
+// the visible span from collapsing to nothing (a floor relative to the full
+// sweep, so it scales with however wide the loaded data actually is) and
+// from growing past the full sweep (so "zoom out" naturally bottoms out at
+// the same view Reset gives you, instead of drifting into empty space).
+export function clampFreqRangeHz(min: number, max: number, dataExtentHz: [number, number] | null): [number, number] {
+  if (!dataExtentHz || !(max > min)) return min < max ? [min, max] : [min, min + 1];
+  const [dMin, dMax] = dataExtentHz;
+  const fullSpan = Math.max(dMax - dMin, 1);
+  const minSpan = Math.max(fullSpan * 0.002, 1);
+  const span = Math.min(Math.max(max - min, minSpan), fullSpan);
+  const center = (min + max) / 2;
+  let newMin = center - span / 2;
+  let newMax = center + span / 2;
+  if (newMin < dMin) {
+    newMax += dMin - newMin;
+    newMin = dMin;
+  }
+  if (newMax > dMax) {
+    newMin -= newMax - dMax;
+    newMax = dMax;
+  }
+  return [Math.max(newMin, dMin), Math.min(newMax, dMax)];
+}
 
-    traces.push({
-      x: freqs,
-      y: delta,
-      name: `Δ ${PARAM_NAMES[i]}`,
-      type: 'scatter',
-      mode: 'lines',
-      line: { color: colors[i], width: 1.5 },
+function trimTrailingZeros(s: string): string {
+  if (!s.includes('.')) return s;
+  return s.replace(/0+$/, '').replace(/\.$/, '');
+}
+
+function formatFreqTick(mhz: number): string {
+  return trimTrailingZeros(mhz.toFixed(3)) || '0';
+}
+
+function formatYTick(v: number): string {
+  return Math.abs(v) < 1 && v !== 0 ? v.toFixed(2) : v.toFixed(1);
+}
+
+function formatHoverValue(v: number, view: View): string {
+  if (view === 'db') return `${v.toFixed(2)} dB`;
+  if (view === 'phase') return `${v.toFixed(1)}°`;
+  if (view === 'groupdelay') return `${v.toFixed(2)} ns`;
+  return v.toFixed(2);
+}
+
+// "Nice" round-number tick generator (1/2/5 x 10^n steps) - Plotly did this
+// automatically; canvas needs it hand-rolled.
+function niceTicks(min: number, max: number, targetCount: number): number[] {
+  if (!(max > min) || targetCount < 1) return [min];
+  const rawStep = (max - min) / targetCount;
+  const mag10 = Math.pow(10, Math.floor(Math.log10(rawStep)));
+  const norm = rawStep / mag10;
+  const niceNorm = norm < 1.5 ? 1 : norm < 3 ? 2 : norm < 7 ? 5 : 10;
+  const step = niceNorm * mag10;
+  const start = Math.ceil(min / step) * step;
+  const ticks: number[] = [];
+  for (let v = start; v <= max + step * 1e-9; v += step) {
+    ticks.push(Math.round(v / step) * step);
+  }
+  return ticks;
+}
+
+interface RectTrace {
+  label: string;
+  param: number;
+  fileLabel?: string;
+  freqsMHz: number[];
+  values: number[];
+}
+
+interface PolarTrace {
+  label: string;
+  param: number;
+  fileLabel?: string;
+  re: number[];
+  im: number[];
+  freqsHz: number[];
+}
+
+interface Frame {
+  view: View | 'smith' | 'polar';
+  plotL: number;
+  plotT: number;
+  plotR: number;
+  plotB: number;
+  xMin: number;
+  xMax: number;
+  x: (dataX: number) => number;
+  y: (dataY: number) => number;
+  xInv: (px: number) => number;
+  rectTraces: RectTrace[];
+  polarTraces: PolarTrace[];
+  markerLines: Array<{ id: number; x: number }>;
+  /** Full sweep range in Hz, for clamping wheel/pan/button zoom - null for
+   *  Smith/Polar (no frequency axis to clamp). */
+  dataExtentHz: [number, number] | null;
+}
+
+interface RenderArgs {
+  entries: ChartEntry[];
+  view: View;
+  markers: Marker[];
+  dbPerDiv: number;
+  refLevel: number;
+  freqRange: [number, number] | null;
+  activeMarkerId: number | null;
+  deltaRefId: number | null;
+  limitUpper: number | null;
+  limitLower: number | null;
+  hiddenTraces: Set<string>;
+  traceOverrides: Map<string, TraceStyle>;
+  showMemoryDelta: boolean;
+  xDivisions: number;
+}
+
+type DragMode = 'none' | 'marker' | 'zoom-select' | 'pan';
+
+/** Owns a <canvas>, its HiDPI sizing/resize, and all pointer/wheel
+ *  interaction. Every draw call and every hit-test read/write the same
+ *  `frame` transform, so clicks always land exactly on what's drawn. */
+export class ChartCanvas {
+  private canvas: HTMLCanvasElement;
+  private wrapEl: HTMLElement;
+  private ctx: CanvasRenderingContext2D;
+  private ro: ResizeObserver;
+  private cb: ChartCallbacks;
+  private dpr = 1;
+
+  private lastArgs: RenderArgs | null = null;
+  private frame: Frame | null = null;
+
+  private downPix: { x: number; y: number } | null = null;
+  private pendingClickTimer: number | null = null;
+  private dragMode: DragMode = 'none';
+  private dragMarkerId = -1;
+  private livePreviewMarkerId: number | null = null;
+  private livePreviewFreqHz: number | null = null;
+  private dragStartX = 0;
+  private dragCurrentX = 0;
+  private panStartX = 0;
+  private panStartRangeMHz: [number, number] | null = null;
+  private livePanRangeMHz: [number, number] | null = null;
+  private hoverPix: { x: number; y: number } | null = null;
+
+  constructor(canvas: HTMLCanvasElement, wrapEl: HTMLElement, callbacks: ChartCallbacks) {
+    this.canvas = canvas;
+    this.wrapEl = wrapEl;
+    this.cb = callbacks;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('vnaviewer: canvas 2d context unavailable');
+    this.ctx = ctx;
+    this.resize();
+    this.ro = new ResizeObserver(() => {
+      this.resize();
+      this.draw();
     });
+    this.ro.observe(wrapEl);
+    this.attachInteractions();
   }
 
-  const yTitle =
-    view === 'db' ? `Δ ${t('magnitude')} (dB)`
-    : view === 'phase' ? `Δ ${t('phase')} (°)`
-    : view === 'groupdelay' ? `Δ ${t('groupDelay')} (ns)`
-    : 'Δ VSWR';
+  render(
+    entries: ChartEntry[],
+    view: View,
+    markers: Marker[],
+    dbPerDiv: number,
+    refLevel: number,
+    freqRange: [number, number] | null,
+    activeMarkerId: number | null,
+    deltaRefId: number | null,
+    limitUpper: number | null,
+    limitLower: number | null,
+    hiddenTraces: Set<string>,
+    traceOverrides: Map<string, TraceStyle>,
+    showMemoryDelta: boolean,
+    xDivisions: number,
+  ): void {
+    this.lastArgs = {
+      entries, view, markers, dbPerDiv, refLevel, freqRange, activeMarkerId, deltaRefId,
+      limitUpper, limitLower, hiddenTraces, traceOverrides, showMemoryDelta, xDivisions,
+    };
+    this.draw();
+  }
 
-  const pad = maxAbs > 0 ? maxAbs * 1.15 : 1;
+  /** Redraws the last render onto a fresh offscreen canvas at `scale`x, for
+   *  compositing into a PNG export - doesn't touch the live on-screen frame. */
+  exportPng(scale = 2): HTMLCanvasElement {
+    const off = document.createElement('canvas');
+    if (!this.lastArgs) {
+      off.width = 1;
+      off.height = 1;
+      return off;
+    }
+    const rect = this.wrapEl.getBoundingClientRect();
+    const cssW = Math.max(1, rect.width);
+    const cssH = Math.max(1, rect.height);
+    off.width = Math.round(cssW * scale);
+    off.height = Math.round(cssH * scale);
+    const offCtx = off.getContext('2d')!;
+    offCtx.setTransform(scale, 0, 0, scale, 0, 0);
 
-  return Plotly.react(
-    el,
-    traces,
-    {
-      ...baseLayout(),
-      title: {
-        text: `${label} − ${memoryEntry.label}`,
-        font: { size: 12, color: theme().muted },
-        x: 0.02,
-        xanchor: 'left' as const,
-        pad: { t: 4 },
-      },
-      xaxis: { ...axisStyle(), title: { text: `${t('frequency')} (MHz)` }, nticks: xDivisions },
-      yaxis: { ...axisStyle(), title: { text: yTitle }, range: [-pad, pad] },
-    },
-    {
-      responsive: true,
-      toImageButtonOptions: { format: 'png', filename: exportFilename([entry], view), scale: 2 },
-    },
-  ).then(() => Plotly.Plots.resize(el));
-}
+    const prevCtx = this.ctx;
+    const prevFrame = this.frame;
+    this.ctx = offCtx;
+    const view = this.lastArgs.view;
+    if (view === 'smith') this.drawRadial(cssW, cssH, 'smith');
+    else if (view === 'polar') this.drawRadial(cssW, cssH, 'polar');
+    else this.drawRectangular(cssW, cssH);
+    this.ctx = prevCtx;
+    this.frame = prevFrame;
+    // Reset to the identity transform so callers compositing on top (marker
+    // table / BW box, see chartExport.ts) can draw in plain device-pixel
+    // coordinates matching off.width/off.height, same contract as any other
+    // freshly-created canvas.
+    offCtx.setTransform(1, 0, 0, 1, 0, 0);
 
-function glyphColor(markerId: number, activeMarkerId: number | null, deltaRefId: number | null): string {
-  const th = theme();
-  if (markerId === deltaRefId) return th.markerDelta;
-  if (markerId === activeMarkerId) return th.markerActive;
-  return th.marker;
-}
+    return off;
+  }
 
-function markerGlyphTrace(
-  paramMarkers: Marker[],
-  allMarkers: Marker[],
-  points: DataPoint[],
-  yValues: number[],
-  activeMarkerId: number | null,
-  deltaRefId: number | null,
-): Plotly.Data {
-  const x: number[] = [];
-  const y: number[] = [];
-  const text: string[] = [];
-  const colors: string[] = [];
+  private resize(): void {
+    const rect = this.wrapEl.getBoundingClientRect();
+    this.dpr = window.devicePixelRatio || 1;
+    const w = Math.max(1, Math.round(rect.width));
+    const h = Math.max(1, Math.round(rect.height));
+    const wantW = Math.round(w * this.dpr);
+    const wantH = Math.round(h * this.dpr);
+    if (this.canvas.width !== wantW) this.canvas.width = wantW;
+    if (this.canvas.height !== wantH) this.canvas.height = wantH;
+    this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+  }
 
-  for (const m of paramMarkers) {
-    let idx = 0;
-    let minDist = Infinity;
-    for (let k = 0; k < points.length; k++) {
-      const d = Math.abs(points[k].freq - m.freq);
-      if (d < minDist) {
-        minDist = d;
-        idx = k;
+  private draw(): void {
+    if (!this.lastArgs) return;
+    const rect = this.wrapEl.getBoundingClientRect();
+    const cssW = Math.max(1, rect.width);
+    const cssH = Math.max(1, rect.height);
+    const wantW = Math.round(cssW * this.dpr);
+    const wantH = Math.round(cssH * this.dpr);
+    if (this.canvas.width !== wantW || this.canvas.height !== wantH) this.resize();
+
+    const view = this.lastArgs.view;
+    if (view === 'smith') this.drawRadial(cssW, cssH, 'smith');
+    else if (view === 'polar') this.drawRadial(cssW, cssH, 'polar');
+    else this.drawRectangular(cssW, cssH);
+  }
+
+  private strokeTrace(
+    freqsMHz: number[],
+    values: number[],
+    xf: (v: number) => number,
+    yf: (v: number) => number,
+    color: string,
+    width: number,
+    dashed: boolean,
+  ): void {
+    const ctx = this.ctx;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.globalAlpha = dashed ? 0.5 : 1;
+    ctx.setLineDash(dashed ? [4, 3] : []);
+    ctx.beginPath();
+    let started = false;
+    for (let i = 0; i < values.length; i++) {
+      const v = values[i];
+      if (!Number.isFinite(v)) {
+        started = false;
+        continue;
+      }
+      const px = xf(freqsMHz[i]);
+      const py = yf(v);
+      if (!started) {
+        ctx.moveTo(px, py);
+        started = true;
+      } else {
+        ctx.lineTo(px, py);
       }
     }
-    x.push(points[idx].freq / 1e6);
-    y.push(yValues[idx]);
-    text.push(String(allMarkers.indexOf(m) + 1));
-    colors.push(glyphColor(m.id, activeMarkerId, deltaRefId));
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
   }
 
-  return {
-    x,
-    y,
-    type: 'scatter',
-    mode: 'text+markers',
-    marker: { symbol: 'triangle-up', size: 10, color: colors, line: { width: 1, color: '#000' } },
-    text,
-    textposition: 'top center',
-    textfont: { color: colors, size: 10 },
-    hoverinfo: 'skip',
-    showlegend: false,
-  };
-}
+  private drawMarkerGlyph(px: number, py: number, color: string, label: string): void {
+    const ctx = this.ctx;
+    ctx.fillStyle = color;
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(px, py - 6);
+    ctx.lineTo(px - 6, py + 4);
+    ctx.lineTo(px + 6, py + 4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
 
-function renderSmith(
-  el: HTMLElement,
-  entries: ChartEntry[],
-  markers: Marker[],
-  activeMarkerId: number | null = null,
-  deltaRefId: number | null = null,
-  hiddenTraces: Set<string> = new Set(),
-  traceOverrides: Map<string, TraceStyle> = new Map(),
-  onExportImage?: () => void,
-): Promise<void> {
-  const traces: Plotly.Data[] = [...smithGrid()];
-  const compare = entries.length > 1;
+    ctx.fillStyle = color;
+    ctx.font = `10px ${MONO_FONT}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(label, px, py - 8);
+  }
 
-  for (const entry of entries) {
-    const { label, color, data, isMemory } = entry;
-    if (hiddenTraces.has(`${label}#0`)) continue;
-    const ov = traceOverrides.get(`${label}#0`);
-    const traceColor = ov?.color ?? color;
-    const width = ov?.width ?? 2;
-    // See the fileLabel filter in render(): a compare-mode marker belongs to
-    // one file's curve, not every overlaid one.
-    const markerPoints = isMemory
-      ? []
-      : markers.filter((m) => !compare || m.fileLabel === label).map((m) => {
-          const pt = data.points.find((p) => p.freq >= m.freq) ?? data.points[data.points.length - 1];
-          return {
-            x: pt.params[0].re,
-            y: pt.params[0].im,
-            num: String(markers.indexOf(m) + 1),
-            hover: `${markers.indexOf(m) + 1} · ${(m.freq / 1e6).toFixed(3)} MHz`,
-            color: glyphColor(m.id, activeMarkerId, deltaRefId),
-          };
-        });
+  private drawRectangular(cssW: number, cssH: number): void {
+    const a = this.lastArgs!;
+    const th = theme();
+    const ctx = this.ctx;
+    ctx.fillStyle = th.bg;
+    ctx.fillRect(0, 0, cssW, cssH);
 
-    const smithX = data.points.map((p) => p.params[0].re);
-    const smithY = data.points.map((p) => p.params[0].im);
-    traces.push({
-      x: smithX,
-      y: smithY,
-      text: data.points.map((p) => `${(p.freq / 1e6).toFixed(3)} MHz`),
-      type: 'scatter',
-      mode: 'lines',
-      name: entries.length > 1 ? label : 'S11',
-      line: { color: traceColor, width, dash: isMemory ? 'dot' : 'solid' },
-      opacity: isMemory ? 0.5 : 1,
-    });
+    const pad = { top: 30, right: 18, bottom: 46, left: 60 };
+    const plotL = pad.left;
+    const plotT = pad.top;
+    const plotR = cssW - pad.right;
+    const plotB = cssH - pad.bottom;
+    const plotW = Math.max(1, plotR - plotL);
+    const plotH = Math.max(1, plotB - plotT);
 
-    if (markerPoints.length > 0) {
-      traces.push({
-        x: markerPoints.map((p) => p.x),
-        y: markerPoints.map((p) => p.y),
-        text: markerPoints.map((p) => p.num),
-        hovertext: markerPoints.map((p) => p.hover),
-        type: 'scatter',
-        mode: 'text+markers',
-        marker: {
-          symbol: 'triangle-up',
-          color: markerPoints.map((p) => p.color),
-          size: 10,
-          line: { width: 1, color: '#000' },
-        },
-        textposition: 'top center',
-        textfont: { color: markerPoints.map((p) => p.color), size: 10 },
-        showlegend: false,
-        hoverinfo: 'text',
-      });
+    const compare = a.entries.length > 1;
+    const dataExtentHz = dataExtentOf(a.entries);
+    const range = this.dragMode === 'pan' && this.livePanRangeMHz
+      ? [this.livePanRangeMHz[0] * 1e6, this.livePanRangeMHz[1] * 1e6]
+      : a.freqRange ?? dataExtentHz ?? [0, 1];
+    const xMinMHz = range[0] / 1e6;
+    const xMaxMHz = range[1] / 1e6;
+
+    let yMin: number;
+    let yMax: number;
+    let yTicks: number[];
+    let titleText: string;
+    let yTitle: string;
+
+    const memMain = a.showMemoryDelta ? a.entries.find((e) => !e.isMemory) : undefined;
+    const memGhost = a.showMemoryDelta ? a.entries.find((e) => e.isMemory) : undefined;
+    const deltaSpecs: Array<{ param: number; delta: number[]; color: string }> = [];
+
+    if (a.showMemoryDelta && memMain && memGhost) {
+      const colors = singleColors();
+      const idxs = paramIndices(memMain.data, false).filter((i) => paramIndices(memGhost.data, false).includes(i));
+      let maxAbs = 0;
+      for (const i of idxs) {
+        if (a.view === 'vswr' && i !== 0 && i !== 3) continue;
+        if (a.hiddenTraces.has(`${memMain.label}#${i}`)) continue;
+        const curY = computeYValues(memMain.data, i, a.view);
+        const memY = computeYValues(memGhost.data, i, a.view);
+        const delta = memMain.data.points.map((p, idx) => curY[idx] - memY[nearestIndex(memGhost.data.points, p.freq)]);
+        for (const d of delta) if (Number.isFinite(d)) maxAbs = Math.max(maxAbs, Math.abs(d));
+        deltaSpecs.push({ param: i, delta, color: colors[i] });
+      }
+      const padY = maxAbs > 0 ? maxAbs * 1.15 : 1;
+      yMin = -padY;
+      yMax = padY;
+      yTicks = niceTicks(yMin, yMax, 8);
+      titleText = `${memMain.label} − ${memGhost.label}`;
+      yTitle = `Δ ${yAxisTitle(a.view)}`;
+    } else {
+      [yMin, yMax] = computeYRange(a.view, a.dbPerDiv, a.refLevel);
+      const yDivs = 10;
+      const yStep = (yMax - yMin) / yDivs;
+      yTicks = Array.from({ length: yDivs + 1 }, (_, i) => yMin + i * yStep);
+      titleText = plotTitle(a.entries, a.view);
+      yTitle = yAxisTitle(a.view);
     }
-  }
 
-  return Plotly.react(
-    el,
-    traces,
-    {
-      ...baseLayout(),
-      title: plotTitle(entries, 'smith'),
-      hovermode: 'closest',
-      xaxis: {
-        ...axisStyle(),
-        title: { text: 'Re(Γ)' },
-        range: [-1.1, 1.1],
-        scaleanchor: 'y',
-        scaleratio: 1,
-      },
-      yaxis: { ...axisStyle(), title: { text: 'Im(Γ)' }, range: [-1.1, 1.1] },
-    },
-    {
-      responsive: true,
-      toImageButtonOptions: { format: 'png', filename: exportFilename(entries, 'smith'), scale: 2 },
-      ...exportModeBarButtons(onExportImage),
-    },
-  ).then(() => Plotly.Plots.resize(el));
-}
+    const xScale = plotW / Math.max(1e-9, xMaxMHz - xMinMHz);
+    const yScale = plotH / Math.max(1e-9, yMax - yMin);
+    const xf = (mhz: number) => plotL + (mhz - xMinMHz) * xScale;
+    const yf = (v: number) => plotB - (v - yMin) * yScale;
+    const xInv = (px: number) => xMinMHz + (px - plotL) / xScale;
 
-function renderPolar(
-  el: HTMLElement,
-  entries: ChartEntry[],
-  markers: Marker[],
-  activeMarkerId: number | null = null,
-  deltaRefId: number | null = null,
-  hiddenTraces: Set<string> = new Set(),
-  traceOverrides: Map<string, TraceStyle> = new Map(),
-  onExportImage?: () => void,
-): Promise<void> {
-  const compare = entries.length > 1;
-  const isHidden = (label: string, i: number) => hiddenTraces.has(`${label}#${i}`);
-  const getOverride = (label: string, i: number) => traceOverrides.get(`${label}#${i}`);
+    // grid
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(plotL, plotT, plotW, plotH);
+    ctx.clip();
+    const xTicks = niceTicks(xMinMHz, xMaxMHz, a.xDivisions);
+    ctx.strokeStyle = th.border;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    for (const tx of xTicks) {
+      const px = Math.round(xf(tx)) + 0.5;
+      ctx.moveTo(px, plotT);
+      ctx.lineTo(px, plotB);
+    }
+    for (const ty of yTicks) {
+      const py = Math.round(yf(ty)) + 0.5;
+      ctx.moveTo(plotL, py);
+      ctx.lineTo(plotR, py);
+    }
+    ctx.stroke();
+    ctx.restore();
 
-  let maxR = 1;
-  for (const { label, data } of entries) {
-    for (const i of paramIndices(data, compare)) {
-      if (isHidden(label, i)) continue;
-      for (const p of data.points) {
-        const m = mag(p.params[i]);
-        if (m > maxR) maxR = m;
+    // tick labels
+    ctx.fillStyle = th.muted;
+    ctx.font = `11px ${MONO_FONT}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    for (const tx of xTicks) {
+      if (xf(tx) < plotL - 1 || xf(tx) > plotR + 1) continue;
+      ctx.fillText(formatFreqTick(tx), xf(tx), plotB + 6);
+    }
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    for (const ty of yTicks) {
+      ctx.fillText(formatYTick(ty), plotL - 8, yf(ty));
+    }
+
+    // axis titles
+    ctx.fillStyle = th.text;
+    ctx.font = `12px ${MONO_FONT}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText(`${t('frequency')} (MHz)`, plotL + plotW / 2, cssH - 6);
+    ctx.save();
+    ctx.translate(14, plotT + plotH / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(yTitle, 0, 0);
+    ctx.restore();
+
+    // traces
+    const rectTraces: RectTrace[] = [];
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(plotL, plotT, plotW, plotH);
+    ctx.clip();
+
+    if (a.showMemoryDelta && memMain) {
+      const freqsMHz = memMain.data.points.map((p) => p.freq / 1e6);
+      for (const spec of deltaSpecs) {
+        this.strokeTrace(freqsMHz, spec.delta, xf, yf, spec.color, 1.5, false);
+        rectTraces.push({ label: memMain.label, param: spec.param, fileLabel: undefined, freqsMHz, values: spec.delta });
+      }
+    } else {
+      const colors = singleColors();
+      for (const entry of a.entries) {
+        const { label, color, data, isMemory } = entry;
+        const freqsMHz = data.points.map((p) => p.freq / 1e6);
+        if (compare) {
+          for (const i of paramIndices(data, true)) {
+            if (a.hiddenTraces.has(`${label}#${i}`)) continue;
+            const ov = a.traceOverrides.get(`${label}#${i}`);
+            const traceColor = ov?.color ?? color;
+            const width = ov?.width ?? 1.5;
+            const values = computeYValues(data, i, a.view);
+            this.strokeTrace(freqsMHz, values, xf, yf, traceColor, width, !!isMemory);
+            rectTraces.push({ label, param: i, fileLabel: label, freqsMHz, values });
+          }
+        } else {
+          for (const i of paramIndices(data, false)) {
+            if (a.view === 'vswr' && i !== 0 && i !== 3) continue;
+            if (a.hiddenTraces.has(`${label}#${i}`)) continue;
+            const ov = a.traceOverrides.get(`${label}#${i}`);
+            const traceColor = ov?.color ?? colors[i];
+            const width = ov?.width ?? 1.5;
+            const values = computeYValues(data, i, a.view);
+            this.strokeTrace(freqsMHz, values, xf, yf, traceColor, width, false);
+            rectTraces.push({ label, param: i, fileLabel: undefined, freqsMHz, values });
+          }
+        }
       }
     }
-  }
-  maxR = Math.ceil(maxR * 5) / 5;
+    ctx.restore();
 
-  const traces: Plotly.Data[] = [...polarGrid(maxR)];
-  const colors = singleColors();
+    const markerLines: Array<{ id: number; x: number }> = [];
 
-  for (const entry of entries) {
-    const { label, color, data, isMemory } = entry;
-    const paramIdxs = paramIndices(data, compare);
+    if (!a.showMemoryDelta) {
+      // limit lines (dB view only)
+      if (a.view === 'db') {
+        ctx.strokeStyle = th.danger;
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([6, 4]);
+        for (const lv of [a.limitUpper, a.limitLower]) {
+          if (lv === null) continue;
+          const py = yf(lv);
+          ctx.beginPath();
+          ctx.moveTo(plotL, py);
+          ctx.lineTo(plotR, py);
+          ctx.stroke();
+        }
+        ctx.setLineDash([]);
+      }
 
-    for (const i of paramIdxs) {
-      if (isHidden(label, i)) continue;
-      const ov = getOverride(label, i);
-      const traceColor = ov?.color ?? (compare ? color : colors[i]);
-      const width = ov?.width ?? 1.5;
-      const x = data.points.map((p) => p.params[i].re);
-      const y = data.points.map((p) => p.params[i].im);
-      traces.push({
-        x,
-        y,
-        text: data.points.map((p) => `${(p.freq / 1e6).toFixed(3)} MHz`),
-        type: 'scatter',
-        mode: 'lines',
-        name: compare ? `${label} · ${PARAM_NAMES[i]}` : PARAM_NAMES[i],
-        line: { color: traceColor, width, dash: isMemory ? 'dot' : 'solid' },
-        opacity: isMemory ? 0.5 : 1,
-      });
+      // marker lines
+      ctx.strokeStyle = th.marker;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([1, 3]);
+      for (const m of a.markers) {
+        const freqMHz = this.livePreviewMarkerId === m.id && this.livePreviewFreqHz !== null
+          ? this.livePreviewFreqHz / 1e6
+          : m.freq / 1e6;
+        const px = xf(freqMHz);
+        markerLines.push({ id: m.id, x: px });
+        ctx.beginPath();
+        ctx.moveTo(px, plotT);
+        ctx.lineTo(px, plotB);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
 
-      if (isMemory) continue;
-      const paramMarkers = markers.filter((m) => m.param === i && (!compare || m.fileLabel === label));
-      if (paramMarkers.length === 0) continue;
-      const markerPoints = paramMarkers.map((m) => {
-        const pt = data.points.reduce((a, b) =>
-          Math.abs(b.freq - m.freq) < Math.abs(a.freq - m.freq) ? b : a,
-        );
-        return {
-          x: pt.params[i].re,
-          y: pt.params[i].im,
-          num: String(markers.indexOf(m) + 1),
-          hover: `${markers.indexOf(m) + 1} · ${(m.freq / 1e6).toFixed(3)} MHz`,
-          color: glyphColor(m.id, activeMarkerId, deltaRefId),
-        };
-      });
-      traces.push({
-        x: markerPoints.map((p) => p.x),
-        y: markerPoints.map((p) => p.y),
-        text: markerPoints.map((p) => p.num),
-        hovertext: markerPoints.map((p) => p.hover),
-        type: 'scatter',
-        mode: 'text+markers',
-        marker: {
-          symbol: 'triangle-up',
-          color: markerPoints.map((p) => p.color),
-          size: 10,
-          line: { width: 1, color: '#000' },
-        },
-        textposition: 'top center',
-        textfont: { color: markerPoints.map((p) => p.color), size: 10 },
-        showlegend: false,
-        hoverinfo: 'text',
-      });
+      // marker glyphs
+      for (const entry of a.entries) {
+        if (entry.isMemory) continue;
+        const { label, data } = entry;
+        const paramsToPlot = compare
+          ? paramIndices(data, true)
+          : paramIndices(data, false).filter((i) => !(a.view === 'vswr' && i !== 0 && i !== 3));
+        for (const i of paramsToPlot) {
+          if (a.hiddenTraces.has(`${label}#${i}`)) continue;
+          const paramMarkers = a.markers.filter((m) => m.param === i && (!compare || m.fileLabel === label));
+          if (paramMarkers.length === 0) continue;
+          const values = computeYValues(data, i, a.view);
+          for (const m of paramMarkers) {
+            const idx = nearestIndex(data.points, m.freq);
+            const px = xf(data.points[idx].freq / 1e6);
+            const py = yf(values[idx]);
+            const color = glyphColor(m.id, a.activeMarkerId, a.deltaRefId);
+            this.drawMarkerGlyph(px, py, color, String(a.markers.indexOf(m) + 1));
+          }
+        }
+      }
     }
-  }
 
-  return Plotly.react(
-    el,
-    traces,
-    {
-      ...baseLayout(),
-      title: plotTitle(entries, 'polar'),
-      hovermode: 'closest',
-      xaxis: {
-        ...axisStyle(),
-        title: { text: 'Re(Γ)' },
-        range: [-maxR * 1.05, maxR * 1.05],
-        scaleanchor: 'y',
-        scaleratio: 1,
-      },
-      yaxis: { ...axisStyle(), title: { text: 'Im(Γ)' }, range: [-maxR * 1.05, maxR * 1.05] },
-    },
-    {
-      responsive: true,
-      toImageButtonOptions: { format: 'png', filename: exportFilename(entries, 'polar'), scale: 2 },
-      ...exportModeBarButtons(onExportImage),
-    },
-  ).then(() => Plotly.Plots.resize(el));
-}
+    // title
+    ctx.fillStyle = th.muted;
+    ctx.font = `12px ${MONO_FONT}`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText(titleText, plotL, 8);
 
-function polarGrid(maxR: number): Plotly.Data[] {
-  const N = 360;
-  const theta = Array.from({ length: N + 1 }, (_, i) => (i * Math.PI * 2) / N);
-  const traces: Plotly.Data[] = [];
-
-  const rings = 4;
-  for (let k = 1; k <= rings; k++) {
-    const r = (maxR * k) / rings;
-    traces.push(gridLine(theta.map((th) => r * Math.cos(th)), theta.map((th) => r * Math.sin(th))));
-  }
-
-  for (let deg = 0; deg < 360; deg += 30) {
-    const rad = (deg * Math.PI) / 180;
-    traces.push(gridLine([0, maxR * Math.cos(rad)], [0, maxR * Math.sin(rad)]));
-  }
-
-  return traces;
-}
-
-function plotTitle(entries: ChartEntry[], view: View) {
-  const files = entries.map((e) => e.label).join(', ');
-
-  let params: string;
-  if (view === 'smith') {
-    params = 'S11 · Smith Chart';
-  } else if (view === 'polar') {
-    if (entries.length > 1) {
-      params = `S11${entries.some((e) => e.data.ports === 2) ? ', S21' : ''} · Polar`;
-    } else {
-      const { ports, full } = entries[0].data;
-      params = `${ports === 1 ? 'S11' : full === false ? 'S11, S21' : 'S11–S22'} · Polar`;
+    // zoom-select overlay
+    if (this.dragMode === 'zoom-select') {
+      const x0 = Math.min(this.dragStartX, this.dragCurrentX);
+      const x1 = Math.max(this.dragStartX, this.dragCurrentX);
+      ctx.fillStyle = 'rgba(255, 225, 77, 0.15)';
+      ctx.fillRect(x0, plotT, x1 - x0, plotH);
+      ctx.strokeStyle = th.marker;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x0, plotT, x1 - x0, plotH);
     }
-  } else {
-    const viewLabel =
-      view === 'db' ? `${t('magnitude')} (dB)`
-      : view === 'phase' ? t('phase')
-      : view === 'groupdelay' ? `${t('groupDelay')} (ns)`
-      : 'VSWR';
-    if (entries.length > 1) {
-      params = `S11${entries.some((e) => e.data.ports === 2) ? ', S21' : ''} · ${viewLabel}`;
-    } else {
-      const { ports, full } = entries[0].data;
-      const measured =
-        ports === 1 ? 'S11'
-        : full === false ? (view === 'vswr' ? 'S11' : 'S11, S21')
-        : view === 'vswr' ? 'S11, S22'
-        : 'S11–S22';
-      params = `${measured} · ${viewLabel}`;
+
+    // hover crosshair + nearest-value readout
+    if (
+      this.hoverPix && this.dragMode === 'none' &&
+      this.hoverPix.x >= plotL && this.hoverPix.x <= plotR &&
+      this.hoverPix.y >= plotT && this.hoverPix.y <= plotB
+    ) {
+      this.drawHoverReadout(rectTraces, xf, xInv, plotT, plotB, plotL, plotR, a.view, compare);
     }
+
+    this.frame = {
+      view: a.view,
+      plotL, plotT, plotR, plotB,
+      xMin: xMinMHz, xMax: xMaxMHz,
+      x: xf, y: yf, xInv,
+      rectTraces, polarTraces: [], markerLines,
+      dataExtentHz,
+    };
   }
 
-  return {
-    text: `${files} · ${params}`,
-    font: { size: 12, color: theme().muted },
-    x: 0.02,
-    xanchor: 'left' as const,
-    pad: { t: 4 },
-  };
-}
+  private drawHoverReadout(
+    rectTraces: RectTrace[],
+    xf: (v: number) => number,
+    xInv: (px: number) => number,
+    plotT: number,
+    plotB: number,
+    plotL: number,
+    plotR: number,
+    view: View,
+    compare: boolean,
+  ): void {
+    const ctx = this.ctx;
+    const th = theme();
+    const hoverFreqMHz = xInv(this.hoverPix!.x);
+    let nearest: { tr: RectTrace; idx: number; dist: number } | null = null;
+    for (const tr of rectTraces) {
+      const idx = nearestArrIndex(tr.freqsMHz, hoverFreqMHz);
+      const dist = Math.abs(tr.freqsMHz[idx] - hoverFreqMHz);
+      if (!nearest || dist < nearest.dist) nearest = { tr, idx, dist };
+    }
+    if (!nearest || !Number.isFinite(nearest.tr.values[nearest.idx])) return;
 
-function smithGrid(): Plotly.Data[] {
-  const N = 360;
-  const theta = Array.from({ length: N + 1 }, (_, i) => (i * Math.PI * 2) / N);
-  const traces: Plotly.Data[] = [];
+    const px = xf(nearest.tr.freqsMHz[nearest.idx]);
+    ctx.strokeStyle = th.muted;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([2, 3]);
+    ctx.beginPath();
+    ctx.moveTo(px, plotT);
+    ctx.lineTo(px, plotB);
+    ctx.stroke();
+    ctx.setLineDash([]);
 
-  traces.push(gridLine(theta.map(Math.cos), theta.map(Math.sin)));
-
-  for (const r of [0.5, 1, 2, 5]) {
-    const cx = r / (1 + r);
-    const rad = 1 / (1 + r);
-    const pts = theta
-      .map((t) => ({ x: cx + rad * Math.cos(t), y: rad * Math.sin(t) }))
-      .filter((p) => p.x ** 2 + p.y ** 2 <= 1.002);
-    traces.push(gridLine(pts.map((p) => p.x), pts.map((p) => p.y)));
+    const prefix = compare ? `${nearest.tr.label} · ${PARAM_NAMES[nearest.tr.param]}` : PARAM_NAMES[nearest.tr.param];
+    const label = `${prefix}  ${nearest.tr.freqsMHz[nearest.idx].toFixed(3)} MHz  ${formatHoverValue(nearest.tr.values[nearest.idx], view)}`;
+    ctx.font = `10px ${MONO_FONT}`;
+    const textW = ctx.measureText(label).width;
+    let boxX = px + 8;
+    if (boxX + textW + 10 > plotR) boxX = px - textW - 18;
+    const boxY = plotT + 4;
+    ctx.fillStyle = th.bg;
+    ctx.strokeStyle = th.border;
+    ctx.lineWidth = 1;
+    ctx.fillRect(boxX, boxY, textW + 10, 16);
+    ctx.strokeRect(boxX, boxY, textW + 10, 16);
+    ctx.fillStyle = th.text;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, boxX + 5, boxY + 8);
   }
 
-  for (const x of [0.5, 1, 2]) {
-    for (const s of [1, -1]) {
+  private strokePoly(xs: number[], ys: number[], xf: (v: number) => number, yf: (v: number) => number): void {
+    const ctx = this.ctx;
+    ctx.beginPath();
+    for (let i = 0; i < xs.length; i++) {
+      const px = xf(xs[i]);
+      const py = yf(ys[i]);
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+  }
+
+  private drawSmithGrid(xf: (v: number) => number, yf: (v: number) => number): void {
+    const N = 360;
+    const theta = Array.from({ length: N + 1 }, (_, i) => (i * Math.PI * 2) / N);
+
+    this.strokePoly(theta.map(Math.cos), theta.map(Math.sin), xf, yf);
+
+    for (const r of [0.5, 1, 2, 5]) {
+      const cx = r / (1 + r);
+      const rad = 1 / (1 + r);
       const pts = theta
-        .map((t) => ({ x: 1 + (1 / x) * Math.cos(t), y: s / x + (1 / x) * Math.sin(t) }))
+        .map((th) => ({ x: cx + rad * Math.cos(th), y: rad * Math.sin(th) }))
         .filter((p) => p.x ** 2 + p.y ** 2 <= 1.002);
-      if (pts.length > 1) traces.push(gridLine(pts.map((p) => p.x), pts.map((p) => p.y)));
+      this.strokePoly(pts.map((p) => p.x), pts.map((p) => p.y), xf, yf);
+    }
+
+    for (const x of [0.5, 1, 2]) {
+      for (const s of [1, -1]) {
+        const pts = theta
+          .map((th) => ({ x: 1 + (1 / x) * Math.cos(th), y: s / x + (1 / x) * Math.sin(th) }))
+          .filter((p) => p.x ** 2 + p.y ** 2 <= 1.002);
+        if (pts.length > 1) this.strokePoly(pts.map((p) => p.x), pts.map((p) => p.y), xf, yf);
+      }
     }
   }
 
-  return traces;
-}
+  private drawPolarGrid(maxR: number, xf: (v: number) => number, yf: (v: number) => number): void {
+    const N = 360;
+    const theta = Array.from({ length: N + 1 }, (_, i) => (i * Math.PI * 2) / N);
 
-function gridLine(x: number[], y: number[]): Plotly.Data {
-  return {
-    x,
-    y,
-    type: 'scatter',
-    mode: 'lines',
-    line: { color: theme().border, width: 1 },
-    hoverinfo: 'none',
-    showlegend: false,
-  };
+    const rings = 4;
+    for (let k = 1; k <= rings; k++) {
+      const r = (maxR * k) / rings;
+      this.strokePoly(theta.map((th) => r * Math.cos(th)), theta.map((th) => r * Math.sin(th)), xf, yf);
+    }
+
+    for (let deg = 0; deg < 360; deg += 30) {
+      const rad = (deg * Math.PI) / 180;
+      this.strokePoly([0, maxR * Math.cos(rad)], [0, maxR * Math.sin(rad)], xf, yf);
+    }
+  }
+
+  private drawRadial(cssW: number, cssH: number, mode: 'smith' | 'polar'): void {
+    const a = this.lastArgs!;
+    const th = theme();
+    const ctx = this.ctx;
+    ctx.fillStyle = th.bg;
+    ctx.fillRect(0, 0, cssW, cssH);
+
+    const pad = { top: 30, right: 16, bottom: 16, left: 16 };
+    const plotL = pad.left;
+    const plotT = pad.top;
+    const plotR = cssW - pad.right;
+    const plotB = cssH - pad.bottom;
+    const plotW = Math.max(1, plotR - plotL);
+    const plotH = Math.max(1, plotB - plotT);
+
+    const compare = a.entries.length > 1;
+    let dataMaxR = 1;
+    if (mode === 'polar') {
+      for (const { label, data } of a.entries) {
+        for (const i of paramIndices(data, compare)) {
+          if (a.hiddenTraces.has(`${label}#${i}`)) continue;
+          for (const p of data.points) {
+            const m = mag(p.params[i]);
+            if (m > dataMaxR) dataMaxR = m;
+          }
+        }
+      }
+      dataMaxR = Math.ceil(dataMaxR * 5) / 5;
+    }
+    const R = mode === 'smith' ? 1.1 : dataMaxR * 1.05;
+
+    const scale = Math.min(plotW, plotH) / (2 * R);
+    const cx = plotL + plotW / 2;
+    const cy = plotT + plotH / 2;
+    const xf = (re: number) => cx + re * scale;
+    const yf = (im: number) => cy - im * scale;
+    const xInv = (px: number) => (px - cx) / scale;
+
+    ctx.strokeStyle = th.border;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([]);
+    if (mode === 'smith') this.drawSmithGrid(xf, yf);
+    else this.drawPolarGrid(dataMaxR, xf, yf);
+
+    const polarTraces: PolarTrace[] = [];
+    const colors = singleColors();
+
+    for (const entry of a.entries) {
+      const { label, color, data, isMemory } = entry;
+      const paramIdxs = mode === 'smith' ? [0] : paramIndices(data, compare);
+      for (const i of paramIdxs) {
+        if (a.hiddenTraces.has(`${label}#${i}`)) continue;
+        const ov = a.traceOverrides.get(`${label}#${i}`);
+        const traceColor = ov?.color ?? (mode === 'smith' ? color : compare ? color : colors[i]);
+        const width = ov?.width ?? (mode === 'smith' ? 2 : 1.5);
+        const re = data.points.map((p) => p.params[i].re);
+        const im = data.points.map((p) => p.params[i].im);
+        const freqsHz = data.points.map((p) => p.freq);
+
+        ctx.strokeStyle = traceColor;
+        ctx.lineWidth = width;
+        ctx.globalAlpha = isMemory ? 0.5 : 1;
+        ctx.setLineDash(isMemory ? [4, 3] : []);
+        this.strokePoly(re, im, xf, yf);
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 1;
+
+        polarTraces.push({ label, param: i, fileLabel: compare ? label : undefined, re, im, freqsHz });
+
+        if (isMemory) continue;
+        const paramMarkers = a.markers.filter((m) => m.param === i && (!compare || m.fileLabel === label));
+        for (const m of paramMarkers) {
+          const idx = nearestIndex(data.points, m.freq);
+          const px = xf(re[idx]);
+          const py = yf(im[idx]);
+          const color = glyphColor(m.id, a.activeMarkerId, a.deltaRefId);
+          this.drawMarkerGlyph(px, py, color, String(a.markers.indexOf(m) + 1));
+        }
+      }
+    }
+
+    ctx.fillStyle = th.muted;
+    ctx.font = `12px ${MONO_FONT}`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText(plotTitle(a.entries, mode), plotL, 8);
+
+    this.frame = {
+      view: mode,
+      plotL, plotT, plotR, plotB,
+      xMin: -R, xMax: R,
+      x: xf, y: yf, xInv,
+      rectTraces: [], polarTraces, markerLines: [],
+      dataExtentHz: null,
+    };
+  }
+
+  private pixelPos(e: PointerEvent | MouseEvent): { x: number; y: number } {
+    const rect = this.canvas.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
+
+  private inPlotArea(p: { x: number; y: number }, f: Frame): boolean {
+    return p.x >= f.plotL && p.x <= f.plotR && p.y >= f.plotT && p.y <= f.plotB;
+  }
+
+  // Rectangular views also treat double-click as "reset zoom" - each click of
+  // that gesture fires its own pointerup first, so placing a marker
+  // immediately would drop a stray one before the browser recognizes the
+  // dblclick. Deferring long enough for a second click to cancel it keeps
+  // single-click-to-mark and double-click-to-reset from stepping on each
+  // other. Smith/Polar have no dblclick behavior, so no need to wait there.
+  private scheduleClick(px: number, py: number): void {
+    this.cancelPendingClick();
+    if (!this.frame || this.frame.view === 'smith' || this.frame.view === 'polar') {
+      this.handleClick(px, py);
+      return;
+    }
+    this.pendingClickTimer = window.setTimeout(() => {
+      this.pendingClickTimer = null;
+      this.handleClick(px, py);
+    }, 250);
+  }
+
+  private cancelPendingClick(): void {
+    if (this.pendingClickTimer !== null) {
+      window.clearTimeout(this.pendingClickTimer);
+      this.pendingClickTimer = null;
+    }
+  }
+
+  private handleClick(px: number, py: number): void {
+    const f = this.frame;
+    if (!f || !this.inPlotArea({ x: px, y: py }, f)) return;
+
+    if (f.view === 'smith' || f.view === 'polar') {
+      let best: { freqHz: number; param: number; fileLabel?: string } | null = null;
+      let bestDist = Infinity;
+      for (const tr of f.polarTraces) {
+        for (let i = 0; i < tr.re.length; i++) {
+          const tx = f.x(tr.re[i]);
+          const ty = f.y(tr.im[i]);
+          const d = (tx - px) ** 2 + (ty - py) ** 2;
+          if (d < bestDist) {
+            bestDist = d;
+            best = { freqHz: tr.freqsHz[i], param: tr.param, fileLabel: tr.fileLabel };
+          }
+        }
+      }
+      if (best) this.cb.onMarkerAdd(best.freqHz, best.param, best.fileLabel);
+      return;
+    }
+
+    const clickFreqMHz = f.xInv(px);
+    let best: { freqHz: number; param: number; fileLabel?: string } | null = null;
+    let bestDy = Infinity;
+    for (const tr of f.rectTraces) {
+      const idx = nearestArrIndex(tr.freqsMHz, clickFreqMHz);
+      const val = tr.values[idx];
+      if (!Number.isFinite(val)) continue;
+      const dy = Math.abs(f.y(val) - py);
+      if (dy < bestDy) {
+        bestDy = dy;
+        best = { freqHz: tr.freqsMHz[idx] * 1e6, param: tr.param, fileLabel: tr.fileLabel };
+      }
+    }
+    if (best) this.cb.onMarkerAdd(best.freqHz, best.param, best.fileLabel);
+  }
+
+  private updateCursor(p: { x: number; y: number }): void {
+    const f = this.frame;
+    if (!f) {
+      this.canvas.style.cursor = 'default';
+      return;
+    }
+    if (f.view !== 'smith' && f.view !== 'polar') {
+      const nearMarker = f.markerLines.some((ml) => Math.abs(ml.x - p.x) <= 6 && p.y >= f.plotT && p.y <= f.plotB);
+      if (nearMarker) {
+        this.canvas.style.cursor = 'ew-resize';
+        return;
+      }
+      this.canvas.style.cursor = this.inPlotArea(p, f) ? 'grab' : 'default';
+      return;
+    }
+    this.canvas.style.cursor = this.inPlotArea(p, f) ? 'crosshair' : 'default';
+  }
+
+  private attachInteractions(): void {
+    const canvas = this.canvas;
+    canvas.addEventListener('pointerdown', (e) => this.onPointerDown(e));
+    canvas.addEventListener('pointermove', (e) => this.onPointerMove(e));
+    canvas.addEventListener('pointerup', (e) => this.onPointerUp(e));
+    canvas.addEventListener('pointercancel', () => this.cancelDrag());
+    canvas.addEventListener('pointerleave', () => {
+      this.hoverPix = null;
+      if (this.dragMode === 'none') this.draw();
+    });
+    canvas.addEventListener('wheel', (e) => this.onWheel(e), { passive: false });
+    canvas.addEventListener('dblclick', () => this.onDblClick());
+  }
+
+  private onPointerDown(e: PointerEvent): void {
+    this.cancelPendingClick();
+    const p = this.pixelPos(e);
+    this.downPix = p;
+    this.dragMode = 'none';
+    const f = this.frame;
+    if (!f || f.view === 'smith' || f.view === 'polar') return;
+
+    const hit = f.markerLines.find((ml) => Math.abs(ml.x - p.x) <= 6);
+    if (hit && p.y >= f.plotT && p.y <= f.plotB) {
+      this.dragMode = 'marker';
+      this.dragMarkerId = hit.id;
+      this.livePreviewMarkerId = hit.id;
+      this.livePreviewFreqHz = null;
+      this.canvas.setPointerCapture(e.pointerId);
+      return;
+    }
+    if (this.inPlotArea(p, f)) {
+      // Shift+drag draws a rectangle to zoom into; a plain drag pans the
+      // current view instead, matching drag-to-pan/shift-drag-to-zoom
+      // conventions from other RF chart tools.
+      if (e.shiftKey) {
+        this.dragMode = 'zoom-select';
+        this.dragStartX = p.x;
+        this.dragCurrentX = p.x;
+      } else {
+        this.dragMode = 'pan';
+        this.panStartX = p.x;
+        this.panStartRangeMHz = [f.xMin, f.xMax];
+        this.livePanRangeMHz = this.panStartRangeMHz;
+        this.canvas.style.cursor = 'grabbing';
+      }
+      this.canvas.setPointerCapture(e.pointerId);
+    }
+  }
+
+  private onPointerMove(e: PointerEvent): void {
+    const p = this.pixelPos(e);
+    if (this.dragMode === 'marker' && this.frame) {
+      this.livePreviewFreqHz = this.frame.xInv(p.x) * 1e6;
+      this.draw();
+      return;
+    }
+    if (this.dragMode === 'zoom-select') {
+      this.dragCurrentX = p.x;
+      this.draw();
+      return;
+    }
+    if (this.dragMode === 'pan' && this.frame && this.panStartRangeMHz) {
+      const pxPerMHz = (this.frame.plotR - this.frame.plotL) / (this.frame.xMax - this.frame.xMin);
+      const deltaMHz = (p.x - this.panStartX) / pxPerMHz;
+      let newMin = this.panStartRangeMHz[0] - deltaMHz;
+      let newMax = this.panStartRangeMHz[1] - deltaMHz;
+      const dataExtentHz = this.frame.dataExtentHz;
+      if (dataExtentHz) {
+        const span = newMax - newMin;
+        const dMinMHz = dataExtentHz[0] / 1e6;
+        const dMaxMHz = dataExtentHz[1] / 1e6;
+        if (newMin < dMinMHz) {
+          newMin = dMinMHz;
+          newMax = dMinMHz + span;
+        }
+        if (newMax > dMaxMHz) {
+          newMax = dMaxMHz;
+          newMin = dMaxMHz - span;
+        }
+      }
+      this.livePanRangeMHz = [newMin, newMax];
+      this.draw();
+      return;
+    }
+    this.hoverPix = p;
+    this.updateCursor(p);
+    this.draw();
+  }
+
+  private onPointerUp(e: PointerEvent): void {
+    const p = this.pixelPos(e);
+    if (this.dragMode === 'marker') {
+      const id = this.dragMarkerId;
+      const freqHz = this.livePreviewFreqHz;
+      this.dragMode = 'none';
+      this.livePreviewMarkerId = null;
+      this.livePreviewFreqHz = null;
+      try { this.canvas.releasePointerCapture(e.pointerId); } catch { /* already released */ }
+      if (freqHz !== null) this.cb.onMarkerDrag(id, freqHz);
+      this.draw();
+      return;
+    }
+    if (this.dragMode === 'zoom-select') {
+      const dx = Math.abs(this.dragCurrentX - this.dragStartX);
+      this.dragMode = 'none';
+      try { this.canvas.releasePointerCapture(e.pointerId); } catch { /* already released */ }
+      if (dx > 4 && this.frame) {
+        const f1 = this.frame.xInv(this.dragStartX);
+        const f2 = this.frame.xInv(this.dragCurrentX);
+        const lo = Math.min(f1, f2) * 1e6;
+        const hi = Math.max(f1, f2) * 1e6;
+        this.cb.onZoomChange(clampFreqRangeHz(lo, hi, this.frame.dataExtentHz));
+      } else {
+        this.scheduleClick(p.x, p.y);
+      }
+      this.draw();
+      return;
+    }
+    if (this.dragMode === 'pan') {
+      const dx = Math.abs(p.x - this.panStartX);
+      const range = this.livePanRangeMHz;
+      this.dragMode = 'none';
+      this.panStartRangeMHz = null;
+      this.livePanRangeMHz = null;
+      try { this.canvas.releasePointerCapture(e.pointerId); } catch { /* already released */ }
+      if (dx > 4 && range) {
+        this.cb.onZoomChange([range[0] * 1e6, range[1] * 1e6]);
+      } else {
+        this.scheduleClick(p.x, p.y);
+      }
+      this.updateCursor(p);
+      this.draw();
+      return;
+    }
+    if (this.downPix && Math.abs(p.x - this.downPix.x) <= 4 && Math.abs(p.y - this.downPix.y) <= 4) {
+      this.scheduleClick(p.x, p.y);
+    }
+    this.downPix = null;
+  }
+
+  private cancelDrag(): void {
+    this.dragMode = 'none';
+    this.panStartRangeMHz = null;
+    this.livePanRangeMHz = null;
+    this.livePreviewMarkerId = null;
+    this.livePreviewFreqHz = null;
+    this.draw();
+  }
+
+  private onWheel(e: WheelEvent): void {
+    const f = this.frame;
+    if (!f || f.view === 'smith' || f.view === 'polar') return;
+    e.preventDefault();
+    const p = this.pixelPos(e);
+    const cursorFreq = f.xInv(p.x);
+    // Scale the step with the actual scroll delta instead of a fixed
+    // per-event jump - a fast wheel click and a light trackpad tick (which
+    // can fire many small-delta events per second) both feel proportional
+    // instead of the trackpad case blowing past several zoom levels at once.
+    const clampedDelta = Math.max(-400, Math.min(400, e.deltaY));
+    const factor = Math.exp(clampedDelta * 0.0015);
+    const newMin = cursorFreq - (cursorFreq - f.xMin) * factor;
+    const newMax = cursorFreq + (f.xMax - cursorFreq) * factor;
+    this.cb.onZoomChange(clampFreqRangeHz(newMin * 1e6, newMax * 1e6, f.dataExtentHz));
+  }
+
+  private onDblClick(): void {
+    this.cancelPendingClick();
+    if (!this.frame || this.frame.view === 'smith' || this.frame.view === 'polar') return;
+    this.cb.onZoomChange(null);
+  }
 }

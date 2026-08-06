@@ -8,11 +8,8 @@
     "preview": "vite preview --host 0.0.0.0",
     "test": "vitest run --config vitest.config.ts"
   },
-  "dependencies": {
-    "plotly.js-dist-min": "^2.35.2"
-  },
+  "dependencies": {},
   "devDependencies": {
-    "@types/plotly.js": "^2.12.29",
     "typescript": "^5.4.5",
     "vite": "^6.3.5",
     "vitest": "^3.1.2"
