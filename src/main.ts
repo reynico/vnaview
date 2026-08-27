@@ -137,6 +137,7 @@ const markerClearActiveBtn = document.getElementById('marker-clear-active') as H
 const markerClearAllBtn = document.getElementById('marker-clear-all') as HTMLButtonElement;
 const bwSearchBtn = document.getElementById('bw-search') as HTMLButtonElement;
 const bwThresholdInput = document.getElementById('bw-threshold') as HTMLInputElement;
+const bwAbsoluteInput = document.getElementById('bw-absolute') as HTMLInputElement;
 const bwOverlay = document.getElementById('bw-overlay')!;
 const resonanceSearchBtn = document.getElementById('resonance-search') as HTMLButtonElement;
 const resonanceOverlay = document.getElementById('resonance-overlay')!;
@@ -193,7 +194,7 @@ function applyI18n(): void {
 
 function refreshDynamicText(): void {
   renderMarkerTable();
-  if (!bwOverlay.hidden) renderBwOverlay(lastBwResult, lastBwThreshold);
+  if (!bwOverlay.hidden) renderBwOverlay(lastBwResult, lastBwThreshold, lastBwAbsolute);
   if (!resonanceOverlay.hidden) renderResonanceOverlay(lastResonanceResult);
   renderChart();
 }
@@ -887,6 +888,7 @@ function updateRailState(): void {
 
 let lastBwResult: BandwidthResult | null = null;
 let lastBwThreshold = 3;
+let lastBwAbsolute = false;
 let bwLowMarkerId: number | null = null;
 let bwHighMarkerId: number | null = null;
 
@@ -899,16 +901,18 @@ function formatFreqSpan(hz: number): string {
   return `${hz.toFixed(0)} Hz`;
 }
 
-function renderBwOverlay(result: BandwidthResult | null, thresholdDb: number): void {
+function renderBwOverlay(result: BandwidthResult | null, thresholdDb: number, absolute: boolean): void {
   lastBwResult = result;
   lastBwThreshold = thresholdDb;
+  lastBwAbsolute = absolute;
   bwOverlay.hidden = false;
   if (!result) {
     bwOverlay.textContent = t('bwNotAvailable');
     return;
   }
   const q = Number.isFinite(result.q) ? result.q.toFixed(1) : '—';
-  bwOverlay.textContent = `BW ${formatFreqSpan(result.bandwidth)} · CTR ${(result.centerFreq / 1e6).toFixed(3)} MHz · Q ${q} · -${thresholdDb}dB`;
+  const ref = absolute ? '0dB' : 'pk';
+  bwOverlay.textContent = `BW ${formatFreqSpan(result.bandwidth)} · CTR ${(result.centerFreq / 1e6).toFixed(3)} MHz · Q ${q} · -${thresholdDb}dB (${ref})`;
 }
 
 let lastResonanceResult: ResonanceResult | null = null;
@@ -1342,7 +1346,8 @@ bwSearchBtn.addEventListener('click', () => {
   const minPt = findMin(f.data.points, param, toDB);
   const mode: 'max' | 'min' = Math.abs(minPt.freq - m.freq) < Math.abs(maxPt.freq - m.freq) ? 'min' : 'max';
   const peakPt = mode === 'min' ? minPt : maxPt;
-  const result = findBandwidth(f.data.points, param, toDB, peakPt.freq, threshold, mode);
+  const absolute = bwAbsoluteInput.checked;
+  const result = findBandwidth(f.data.points, param, toDB, peakPt.freq, threshold, mode, absolute ? 0 : undefined);
 
   if (result) {
     removeMarkerById(bwLowMarkerId);
@@ -1358,7 +1363,7 @@ bwSearchBtn.addEventListener('click', () => {
     activeMarkerId = high.id;
   }
 
-  renderBwOverlay(result, threshold);
+  renderBwOverlay(result, threshold, absolute);
   renderMarkerTable();
   renderChart();
 });

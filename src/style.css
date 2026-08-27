@@ -752,6 +752,17 @@ main.dropping::after {
   border-color: var(--accent);
 }
 
+.rail-checkbox-label {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+}
+
+.rail-checkbox-label input {
+  width: auto;
+}
+
 #marker-delta-toggle.active {
   background: var(--marker);
   border-color: var(--marker);

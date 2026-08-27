@@ -75,13 +75,19 @@ export interface BandwidthResult {
 
 /**
  * -N dB (default 3 dB) bandwidth around a peak or notch: scans outward from
- * the point nearest `peakFreq` until the value crosses `peakValue -
- * thresholdDb` (mode 'max', for a passband peak) or `peakValue +
+ * the point nearest `peakFreq` until the value crosses `refValue -
+ * thresholdDb` (mode 'max', for a passband peak) or `refValue +
  * thresholdDb` (mode 'min', for a resonance/rejection notch) on each side,
  * linearly interpolating between the bracketing samples for sub-sample-step
  * accuracy. Returns null if either side never crosses the threshold within
  * the data (peak too close to a data boundary) rather than fabricating an
  * edge value.
+ *
+ * `refValue` defaults to the peak/notch value itself (standard VNA marker-
+ * search behavior: BW is measured relative to the trace's own extremum, so
+ * a lossy filter's shape can still be characterized regardless of its
+ * insertion loss). Pass 0 explicitly to measure against absolute 0 dB
+ * instead.
  */
 export function findBandwidth(
   points: DataPoint[],
@@ -90,6 +96,7 @@ export function findBandwidth(
   peakFreq: number,
   thresholdDb = 3,
   mode: 'max' | 'min' = 'max',
+  refValue?: number,
 ): BandwidthResult | null {
   if (points.length < 2) return null;
   const values = points.map((p) => valueFn(p.params[param]));
@@ -104,7 +111,8 @@ export function findBandwidth(
     }
   }
 
-  const target = mode === 'max' ? values[peakIdx] - thresholdDb : values[peakIdx] + thresholdDb;
+  const ref = refValue ?? values[peakIdx];
+  const target = mode === 'max' ? ref - thresholdDb : ref + thresholdDb;
   const crossed = (a: number, b: number) => (mode === 'max' ? a < target && b >= target : a > target && b <= target);
 
   let lowFreq: number | null = null;

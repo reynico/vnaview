@@ -103,6 +103,18 @@ describe('findBandwidth', () => {
     expect(result!.centerFreq).toBeCloseTo(5e6);
     expect(result!.bandwidth).toBeCloseTo(2.5e6);
   });
+
+  it('measures against an explicit reference instead of the peak value', () => {
+    // Same fixture, but a lossy peak (value 7 instead of 10) with refValue
+    // pinned to 0 - -3dB target is 0-3=-3, which this fixture never reaches,
+    // so the peak-relative target (7-3=4, crossed at indices 3-4/6-7) and the
+    // absolute one diverge: only the peak-relative search finds a band.
+    const lossyPeak = pointsFromValues([0, 0, 0, 4, 6, 7, 6, 4, 0, 0, 0]);
+    const relative = findBandwidth(lossyPeak, 0, valueFn, lossyPeak[5].freq, 3, 'max');
+    const absolute = findBandwidth(lossyPeak, 0, valueFn, lossyPeak[5].freq, 3, 'max', 0);
+    expect(relative).not.toBeNull();
+    expect(absolute).toBeNull();
+  });
 });
 
 describe('findResonance', () => {
